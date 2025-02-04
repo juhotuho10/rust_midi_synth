@@ -1,20 +1,14 @@
 [package]
-name = "nimi2"
+name = "rust_midi_synth"
 version = "0.1.0"
 authors = ["juhotuho10"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-esp-backtrace = { version = "0.14.2", features = [
-    "esp32",
-    "exception-handler",
-    "panic-handler",
-    "println",
-] }
-esp-hal = { version = "0.21.0", features = [ "esp32" ] }
-esp-println = { version = "0.12.0", features = ["esp32", "log"] }
-log = { version = "0.4.22" }
+esp32-hal = { version = "0.15.0", features = ["rt"] }
+panic-halt = "1.0.0"
+
 [profile.dev]
 # Rust debug is too slow.
 # For debug builds always builds with some optimization
