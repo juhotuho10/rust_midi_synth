@@ -1,17 +1,18 @@
 #![no_std]
 #![no_main]
+use esp32_hal::prelude::*;
+use esp32_hal::xtensa_lx_rt::entry;
+use panic_halt as _;
 
 use esp32_hal::{
-    clock::ClockControl, entry, gpio::IO, peripherals::Peripherals, prelude::*, timer::TimerGroup,
-    Delay, Rtc,
+    clock::ClockControl, gpio::IO, peripherals::Peripherals, timer::TimerGroup, Delay, Rtc,
 };
-
-//use esp32_hal::xtensa_lx_rt::entry; ??
-use panic_halt as _;
 
 #[entry]
 fn main() -> ! {
     let peripherals = Peripherals::take();
+
+    // ---------- set up clock ----------
     let mut system = peripherals.DPORT.split();
     let clocks = ClockControl::boot_defaults(system.clock_control).freeze();
 
@@ -25,15 +26,22 @@ fn main() -> ! {
     wdt.disable();
     rtc.rwdt.disable();
 
+    // ---------- set up pins ----------
+
     let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
+
     let mut led = io.pins.gpio2.into_push_pull_output();
+
+    let mut pin0 = io.pins.gpio0.into_push_pull_output();
 
     let mut delay = Delay::new(&clocks);
 
     loop {
         led.set_high().unwrap();
-        delay.delay_ms(3000u32);
+        pin0.set_high().unwrap();
+        delay.delay_ms(300u32);
         led.set_low().unwrap();
-        delay.delay_ms(3000u32);
+        pin0.set_low().unwrap();
+        delay.delay_ms(300u32);
     }
 }
