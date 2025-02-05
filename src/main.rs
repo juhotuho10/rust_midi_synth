@@ -30,6 +30,7 @@ impl Analog8 {
         self.value = self.value.saturating_sub(10);
     }
 }
+
 fn get_knob_rotation(
     last_clk: bool,
     last_dt: bool,
@@ -42,13 +43,21 @@ fn get_knob_rotation(
             (false, true) => Some(Rotation::Right),
             (_, _) => None,
         },
-
         (false, false) => match (current_clk, current_dt) {
             (false, true) => Some(Rotation::Left),
             (true, false) => Some(Rotation::Right),
             (_, _) => None,
         },
-        (_, _) => None,
+        (true, false) => match (current_clk, current_dt) {
+            (false, false) => Some(Rotation::Left),
+            (true, true) => Some(Rotation::Right),
+            (_, _) => None,
+        },
+        (false, true) => match (current_clk, current_dt) {
+            (true, true) => Some(Rotation::Left),
+            (false, false) => Some(Rotation::Right),
+            (_, _) => None,
+        },
     }
 }
 
@@ -143,6 +152,6 @@ fn main() -> ! {
         last_sw_state = current_sw_state;
         last_clk_state = current_clk_state;
 
-        delay.delay_ms(5u32);
+        delay.delay_ms(1u32);
     }
 }
