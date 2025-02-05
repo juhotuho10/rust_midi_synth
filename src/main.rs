@@ -1,7 +1,10 @@
 #![no_std]
 #![no_main]
+use esp32_hal::adc::{AdcConfig, Attenuation, ADC, ADC2};
+use esp32_hal::dac::DAC1;
 use esp32_hal::prelude::*;
 use esp32_hal::xtensa_lx_rt::entry;
+use esp_println::println;
 use panic_halt as _;
 
 use esp32_hal::{
@@ -13,6 +16,20 @@ enum Rotation {
     Right,
 }
 
+#[derive(Debug, Default)]
+struct Analog8 {
+    value: u8,
+}
+
+impl Analog8 {
+    fn inc(&mut self) {
+        self.value = self.value.saturating_add(10);
+    }
+
+    fn dec(&mut self) {
+        self.value = self.value.saturating_sub(10);
+    }
+}
 fn get_knob_rotation(
     last_clk: bool,
     last_dt: bool,
@@ -21,17 +38,17 @@ fn get_knob_rotation(
 ) -> Option<Rotation> {
     match (last_clk, last_dt) {
         (true, true) => match (current_clk, current_dt) {
-            (true, false) => return Some(Rotation::Left),
-            (false, true) => return Some(Rotation::Right),
-            (_, _) => return None,
+            (true, false) => Some(Rotation::Left),
+            (false, true) => Some(Rotation::Right),
+            (_, _) => None,
         },
 
         (false, false) => match (current_clk, current_dt) {
-            (false, true) => return Some(Rotation::Left),
-            (true, false) => return Some(Rotation::Right),
-            (_, _) => return None,
+            (false, true) => Some(Rotation::Left),
+            (true, false) => Some(Rotation::Right),
+            (_, _) => None,
         },
-        (_, _) => return None,
+        (_, _) => None,
     }
 }
 
@@ -63,9 +80,32 @@ fn main() -> ! {
     let mut led = io.pins.gpio2.into_push_pull_output();
 
     // roatry encoder input pins
-    let clk = io.pins.gpio26.into_pull_up_input();
-    let dt = io.pins.gpio1.into_pull_up_input();
-    let sw = io.pins.gpio3.into_pull_up_input();
+    let clk = io.pins.gpio5.into_pull_up_input();
+    let dt = io.pins.gpio13.into_pull_up_input();
+    let sw = io.pins.gpio12.into_pull_up_input();
+
+    // ---------- set up analog ADC pin ----------
+
+    //let analog = peripherals.SENS.split();
+
+    //DAC1::dac(peripherals.AES.start(), io.pins.gpio25.into_analog());
+
+    //let mut adc1_config = AdcConfig::new();
+
+    //let mut pin25 =
+    //    adc1_config.enable_pin(io.pins.gpio25.into_analog(), Attenuation::Attenuation11dB);
+
+    //let mut adc2 = ADC::<ADC2>::adc(analog.adc2, adc1_config).unwrap();
+
+    // ---------- set up analog DAC pin ----------
+
+    let dac_pin = io.pins.gpio25.into_analog();
+    let mut dac_25 = DAC1::dac(peripherals.AES, dac_pin).unwrap();
+
+    // ---------- set baseline states ----------
+
+    let mut analog_value_pin25 = Analog8::default();
+    dac_25.write(analog_value_pin25.value);
 
     // last states for rotary encode pins
     let mut last_clk_state = clk.is_high().unwrap();
@@ -90,9 +130,12 @@ fn main() -> ! {
             current_dt_state,
         ) {
             match rotation {
-                Rotation::Left => pin0.set_low().unwrap(),
-                Rotation::Right => pin0.set_high().unwrap(),
+                Rotation::Left => analog_value_pin25.dec(),
+                Rotation::Right => analog_value_pin25.inc(),
             }
+
+            println!("{}", analog_value_pin25.value);
+            dac_25.write(analog_value_pin25.value);
         }
 
         // reset current states
