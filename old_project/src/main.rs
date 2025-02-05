@@ -1,12 +1,13 @@
 #![no_std]
 #![no_main]
-use esp32_hal::prelude::*;
-use esp32_hal::xtensa_lx_rt::entry;
-use panic_halt as _;
-
-use esp32_hal::{
-    clock::ClockControl, gpio::IO, peripherals::Peripherals, timer::TimerGroup, Delay, Rtc,
-};
+//use esp32_hal::prelude::*;
+//use esp32_hal::xtensa_lx_rt::entry;
+//use panic_halt as _;
+//
+//use esp32_hal::{
+//    clock::ClockControl, gpio::IO, peripherals::Peripherals, timer::TimerGroup, Delay, Rtc,
+//};
+use esp_hal_embassy;
 
 #[entry]
 fn main() -> ! {

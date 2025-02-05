@@ -11,3 +11,4 @@ target/
 
 # misc
 powershell_command.txt
+Cargo.lock
