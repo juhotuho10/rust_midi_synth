@@ -85,7 +85,7 @@ fn main() -> ! {
 
     let mut pin0 = io.pins.gpio0.into_push_pull_output();
     let mut led = io.pins.gpio2.into_push_pull_output();
-    let buzzer_pin = io.pins.gpio26.into_push_pull_output();
+    let mut buzzer_pin = io.pins.gpio26.into_push_pull_output();
 
     // roatry encoder input pins
     let clk = io.pins.gpio5.into_pull_up_input();
@@ -172,11 +172,13 @@ fn main() -> ! {
             dac_25.write(analog_value_pin25.value);
         }
 
+        buzzer_pin.toggle().unwrap();
+
         // reset current states
         last_dt_state = current_dt_state;
         last_sw_state = current_sw_state;
         last_clk_state = current_clk_state;
 
-        delay.delay_ms(1u32);
+        delay.delay_ms(2u32);
     }
 }
