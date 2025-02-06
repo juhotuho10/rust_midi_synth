@@ -33,6 +33,21 @@ impl Analog8 {
     }
 }
 
+#[derive(Debug)]
+struct Analog16 {
+    value: u16,
+}
+
+impl Analog16 {
+    fn inc(&mut self) {
+        self.value = self.value.saturating_add(10);
+    }
+
+    fn dec(&mut self) {
+        self.value = self.value.saturating_sub(10);
+    }
+}
+
 fn get_knob_rotation(
     last_clk: bool,
     last_dt: bool,
@@ -135,6 +150,7 @@ fn main() -> ! {
     // ---------- set baseline states ----------
 
     let mut analog_value_pin25 = Analog8::default();
+    let mut wait_time = Analog16 { value: 1000 };
     dac_25.write(analog_value_pin25.value);
 
     // last states for rotary encode pins
@@ -164,11 +180,18 @@ fn main() -> ! {
             current_dt_state,
         ) {
             match rotation {
-                Rotation::Left => analog_value_pin25.dec(),
-                Rotation::Right => analog_value_pin25.inc(),
+                Rotation::Left => {
+                    analog_value_pin25.dec();
+                    wait_time.dec();
+                }
+                Rotation::Right => {
+                    analog_value_pin25.inc();
+                    wait_time.inc();
+                }
             }
 
-            println!("{}", analog_value_pin25.value);
+            println!("analog led pin value: {}", analog_value_pin25.value);
+            println!("wait time: {} micros", wait_time.value);
             dac_25.write(analog_value_pin25.value);
         }
 
@@ -179,6 +202,6 @@ fn main() -> ! {
         last_sw_state = current_sw_state;
         last_clk_state = current_clk_state;
 
-        delay.delay_ms(2u32);
+        delay.delay_micros(wait_time.value as u32);
     }
 }
