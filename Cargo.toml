@@ -6,6 +6,8 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+
+midly = { version = "=0.5.3", default-features = false}
 esp32-hal = { version = "0.18.1", features = ["rt"] }
 panic-halt = "1.0.0"
 esp-println = { version = "0.13.0", features = ["esp32", "log"] }
