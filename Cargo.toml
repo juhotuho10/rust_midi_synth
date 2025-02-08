@@ -11,6 +11,7 @@ midly = { version = "=0.5.3", default-features = false}
 esp32-hal = { version = "0.18.1", features = ["rt"] }
 panic-halt = "1.0.0"
 esp-println = { version = "0.13.0", features = ["esp32", "log"] }
+heapless = "0.8.0"
 
 [profile.dev]
 # Rust debug is too slow.

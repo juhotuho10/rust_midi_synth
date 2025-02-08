@@ -1,19 +1,23 @@
 #![no_std]
 #![no_main]
+
 use esp32_hal::adc::{AdcConfig, Attenuation, ADC, ADC2};
 use esp32_hal::dac::DAC1;
 use esp32_hal::gpio::{AnyPin, Output, PushPull};
 use esp32_hal::ledc::channel::config::Config;
 use esp32_hal::ledc::{channel, timer, LowSpeed, LEDC};
-use esp32_hal::prelude::*;
 use esp32_hal::xtensa_lx_rt::entry;
-use esp_println::println;
-use midly::{parse, MetaMessage, Timing, TrackEventKind};
-use panic_halt as _;
-
 use esp32_hal::{
     clock::ClockControl, gpio::IO, peripherals::Peripherals, timer::TimerGroup, Delay, Rtc,
 };
+use esp32_hal::{prelude::*, reset};
+use esp_println::println;
+
+use heapless::Deque;
+use midly::{
+    parse, EventIter, Header, MetaMessage, MidiMessage, Timing, TrackEvent, TrackEventKind,
+};
+use panic_halt as _;
 
 const MIDI_DATA: &[u8] = &[
     0x4d, 0x54, 0x68, 0x64, 0x00, 0x00, 0x00, 0x06, 0x00, 0x01, 0x00, 0x02, 0x00, 0x60, 0x4d, 0x54,
@@ -32,9 +36,115 @@ const MIDI_DATA: &[u8] = &[
     0x80, 0x45, 0x5a, 0x00, 0x80, 0x43, 0x5a, 0x84, 0x40, 0xff, 0x2f, 0x00,
 ];
 
-enum Rotation {
-    Left,
-    Right,
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+struct SongMetaData {
+    timing: u16,             // ticks per quarter note
+    tempo: u32,              // micro seconds per quarter note
+    bpm: u16,                // ms / min = 60_000_000, so BPM = 60_000_000 / tempo
+    time_signature: [u8; 4], // [beats per measure, denominator of the time signature as 1/2^n,midi clock per quarter note, Number of Notated 32nd Notes in a MIDI Quarter Note]
+    key: (i8, bool),         // ((-n_of_flats, + n_of_sharps), major / minor)
+}
+
+impl SongMetaData {
+    fn new(header: Header, meta_events: EventIter) -> Self {
+        let timing = match header.timing {
+            Timing::Metrical(metric_timing) => metric_timing.as_int(),
+            Timing::Timecode(_, _) => unimplemented!(),
+        };
+
+        let mut metadata = SongMetaData {
+            timing,
+            tempo: 500_000,                // default tempo
+            bpm: 120,                      // default BPM
+            time_signature: [4, 4, 24, 8], // default: 4/4
+            key: (0, false),               // default: C major
+        };
+
+        for event in meta_events.flatten() {
+            if let TrackEventKind::Meta(meta_event) = event.kind {
+                match meta_event {
+                    MetaMessage::Tempo(tempo) => {
+                        metadata.tempo = tempo.as_int();
+                    }
+                    MetaMessage::TimeSignature(num, den, clocks, notes_32nd) => {
+                        metadata.time_signature = [num, den, clocks, notes_32nd];
+                    }
+                    MetaMessage::KeySignature(sharps_flats, minor) => {
+                        metadata.key = (sharps_flats, minor);
+                    }
+                    _ => (),
+                }
+            }
+        }
+
+        metadata.refresh_bpm(metadata.tempo);
+
+        metadata
+    }
+
+    fn refresh_bpm(&mut self, tempo: u32) {
+        let micros_per_min = 60_000_000;
+        self.bpm = (micros_per_min / tempo) as u16;
+    }
+}
+
+struct SongPlayer {
+    SoundData: InstrumentSounds,
+    Free_Buzzers: Deque<SoundBuzzer, 16>,
+    Taken_Buzzers: Deque<SoundBuzzer, 16>,
+}
+
+impl SongPlayer {
+    fn new(Buzzers: Deque<SoundBuzzer, 16>) -> Self {
+        SongPlayer {
+            SoundData: InstrumentSounds::new(),
+            Free_Buzzers: Buzzers,
+            Taken_Buzzers: Deque::new(),
+        }
+    }
+
+    fn reset(&mut self) {
+        while let Some(mut buzzer) = self.Taken_Buzzers.pop_front() {
+            let _ = buzzer.buzzer_pin.set_low();
+            let _ = self.Free_Buzzers.push_back(buzzer);
+        }
+    }
+
+    fn play_song(&mut self, mut metadata: SongMetaData, mut song_events: EventIter) {
+        for event in song_events.flatten() {
+            let TrackEvent { delta, kind } = event;
+            match kind {
+                TrackEventKind::Midi { channel, message } => match message {
+                    MidiMessage::NoteOff { key, vel } => todo!(),
+                    MidiMessage::NoteOn { key, vel } => todo!(),
+                    MidiMessage::Aftertouch { key, vel } => println!("not implemented"),
+                    MidiMessage::Controller { controller, value } => println!("not implemented"),
+                    MidiMessage::ProgramChange { program } => println!("not implemented"),
+                    MidiMessage::ChannelAftertouch { vel } => println!("not implemented"),
+                    MidiMessage::PitchBend { bend } => println!("not implemented"),
+                },
+                TrackEventKind::Meta(meta_message) => match meta_message {
+                    MetaMessage::EndOfTrack => return self.reset(),
+                    MetaMessage::Tempo(u24) => todo!(),
+                    MetaMessage::SmpteOffset(smpte_time) => todo!(),
+                    MetaMessage::MidiChannel(u4) => todo!(),
+                    MetaMessage::MidiPort(u7) => todo!(),
+                    MetaMessage::TimeSignature(a, b, c, d) => {
+                        metadata.time_signature = [a, b, c, d]
+                    }
+                    MetaMessage::KeySignature(key, sharp) => metadata.key = (key, sharp),
+                    MetaMessage::TrackNumber(_) => println!("not implemented"),
+                    MetaMessage::Text(items) => println!("not implemented"),
+                    MetaMessage::TrackName(items) => println!("not implemented"),
+                    MetaMessage::InstrumentName(items) => println!("not implemented"),
+
+                    _ => {}
+                },
+                _ => return self.reset(),
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -116,19 +226,9 @@ impl SoundBuzzer {
     }
 }
 
-#[derive(Debug)]
-struct Analog16 {
-    value: u16,
-}
-
-impl Analog16 {
-    fn inc(&mut self) {
-        self.value = self.value.saturating_add(10);
-    }
-
-    fn dec(&mut self) {
-        self.value = self.value.saturating_sub(10);
-    }
+enum Rotation {
+    Left,
+    Right,
 }
 
 fn get_knob_rotation(
@@ -164,13 +264,23 @@ fn get_knob_rotation(
 #[entry]
 fn main() -> ! {
     let peripherals = Peripherals::take();
-    let (header, track_iter) = parse(MIDI_DATA).unwrap();
-    println!("{:?}", header);
 
-    for event_iter in track_iter.clone().flatten() {
-        for e in event_iter.flatten() {
-            println!("{:?}", e);
-        }
+    // ---------- load track ----------
+
+    let (header, track_iter) = parse(MIDI_DATA).unwrap();
+    let mut track_iter = track_iter.flatten();
+    println!("{:?}", header);
+    let meta_info = track_iter.next().unwrap();
+
+    let track = track_iter.next().unwrap();
+
+    let track_meta_data = SongMetaData::new(header, meta_info);
+
+    println!("{:?}", track_meta_data);
+
+    println!("track music data");
+    for track_event in track {
+        println!("{:?}", track_event);
     }
 
     // ---------- set up clock ----------
@@ -182,6 +292,8 @@ fn main() -> ! {
     let mut rtc = Rtc::new(peripherals.LPWR);
     wdt.disable();
     rtc.rwdt.disable();
+
+    // rtc.get_time_us()
 
     let delay = Delay::new(&clocks);
 
@@ -241,7 +353,9 @@ fn main() -> ! {
     // ---------- set baseline states ----------
 
     let mut analog_value_pin25 = Analog8::default();
-    let instruments = InstrumentSounds::new();
+    let mut buzzer_queue: Deque<SoundBuzzer, 16> = Deque::new();
+    let mut song_player = SongPlayer::new(buzzer_queue);
+
     dac_25.write(analog_value_pin25.value);
 
     // last states for rotary encode pins
@@ -250,6 +364,9 @@ fn main() -> ! {
     let mut last_sw_state = sw.is_low().unwrap();
 
     let mut buzzer_0 = SoundBuzzer::new(pin26.degrade(), 1000, 50);
+    //buzzer_queue.push_back(buzzer_0);
+
+    // todo: add a self healing meachanism that tries to catch up / slow down to get the correct beat
 
     loop {
         // current states
@@ -275,7 +392,7 @@ fn main() -> ! {
             match rotation {
                 Rotation::Left => {
                     if led.is_set_high().unwrap() {
-                        buzzer_0.adjust_duty(-5);
+                        buzzer_0.adjust_duty(-1);
                     } else {
                         buzzer_0.adjust_period(20);
                     }
@@ -283,7 +400,7 @@ fn main() -> ! {
                 }
                 Rotation::Right => {
                     if led.is_set_high().unwrap() {
-                        buzzer_0.adjust_duty(5);
+                        buzzer_0.adjust_duty(1);
                     } else {
                         buzzer_0.adjust_period(-20);
                     }
