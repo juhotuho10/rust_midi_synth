@@ -12,3 +12,5 @@ target/
 # misc
 powershell_command.txt
 Cargo.lock
+midi_hexdump.py
+*.mid
