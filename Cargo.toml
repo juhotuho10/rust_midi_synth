@@ -6,11 +6,17 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-
-midly = { version = "=0.5.3", default-features = false}
-esp32-hal = { version = "0.18.1", features = ["rt"] }
-panic-halt = "1.0.0"
+critical-section = "1.2.0"
+esp-backtrace = { version = "0.15.0", features = [
+  "esp32",
+  "exception-handler",
+  "panic-handler",
+  "println",
+] }
+esp-hal = { version = "0.23.1", features = ["esp32", "unstable"] }
 esp-println = { version = "0.13.0", features = ["esp32", "log"] }
+log = { version = "0.4.21" }
+midly = { version = "=0.5.3", default-features = false}
 heapless = "0.8.0"
 
 [profile.dev]
@@ -19,10 +25,10 @@ heapless = "0.8.0"
 opt-level = "s"
 
 [profile.release]
-codegen-units = 1 # LLVM can perform better optimizations using a single thread
-debug = 2
+codegen-units    = 1     # LLVM can perform better optimizations using a single thread
+debug            = 2
 debug-assertions = false
-incremental = false
-lto = 'fat'
-opt-level = 's'
-overflow-checks = false
+incremental      = false
+lto              = 'fat'
+opt-level        = 's'
+overflow-checks  = false
