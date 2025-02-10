@@ -8,7 +8,11 @@ use esp_hal::analog::dac::Dac;
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
 use esp_hal::gpio::{AnyPin, Event, Input, Io, Level, Output, Pull};
+use esp_hal::ledc::channel::ChannelIFace;
+use esp_hal::ledc::timer::{HSClockSource, TimerIFace};
+use esp_hal::ledc::{channel, timer, HighSpeed, LSGlobalClkSource, Ledc, LowSpeed};
 use esp_hal::main;
+use esp_hal::time::RateExtU32;
 use log::info;
 
 use esp_println::println;
@@ -336,7 +340,10 @@ impl<'a> SongPlayer<'a> {
         for event in song_events.flatten() {
             let TrackEvent { delta, kind } = event;
 
-            let mut delta_time = Self::delta_to_micros(delta.as_int(), metadata);
+            let arbitrary_len = 2.7;
+
+            let mut delta_time =
+                (Self::delta_to_micros(delta.as_int(), metadata) as f32 * arbitrary_len) as u64;
             println!("{}", delta_time);
             while delta_time > 0 {
                 self.play_buzzers();
@@ -439,7 +446,7 @@ struct InstrumentSounds {
 impl InstrumentSounds {
     fn new() -> Self {
         InstrumentSounds {
-            profiles: [SoundProfile { frequency: 2500 }; 128],
+            profiles: [SoundProfile { frequency: 4000 }; 128],
         }
     }
 }
@@ -606,10 +613,10 @@ fn main() -> ! {
 
     println!("{:?}", track_meta_data);
 
-    println!("track music data");
-    for track_event in track.clone() {
-        println!("{:?}", track_event);
-    }
+    // println!("track music data");
+    // for track_event in track.clone() {
+    //     println!("{:?}", track_event);
+    // }
 
     // ---------- set up pins ----------
 
@@ -625,6 +632,37 @@ fn main() -> ! {
     let mut dac_25 = Dac::new(peripherals.DAC1, peripherals.GPIO25);
 
     // ---------- set up PWM for driving buzzer ----------
+
+    // let mut ledc = Ledc::new(peripherals.LEDC);
+    // ledc.set_global_slow_clock(LSGlobalClkSource::APBClk);
+    //
+    // let mut lstimer0 = ledc.timer::<HighSpeed>(timer::Number::Timer0);
+    // lstimer0
+    //     .configure(timer::config::Config {
+    //         duty: timer::config::Duty::Duty3Bit,
+    //         clock_source: timer::HSClockSource::APBClk,
+    //         frequency: 4u32.MHz(),
+    //     })
+    //     .unwrap();
+    //
+    // let mut channel0 = ledc.channel(channel::Number::Channel0, led);
+    // channel0
+    //     .configure(channel::config::Config {
+    //         timer: &lstimer0,
+    //         duty_pct: 100,
+    //         pin_config: channel::config::PinConfig::PushPull,
+    //     })
+    //     .unwrap();
+    //
+    // loop {
+    //     // Set up a breathing LED: fade from off to on over a second, then
+    //     // from on back off over the next second.  Then loop.
+    //
+    //     channel0.start_duty_fade(10, 100, 1).unwrap();
+    //     while channel0.is_duty_fade_running() {}
+    //     channel0.start_duty_fade(100, 10, 1).unwrap();
+    //     while channel0.is_duty_fade_running() {}
+    // }
 
     // ---------- set baseline states ----------
 
