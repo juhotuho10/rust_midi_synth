@@ -14,7 +14,7 @@ use esp32_hal::{
 use esp_println::{dbg, println};
 
 use heapless::{Deque, LinearMap, Vec};
-use midly::num::{u28, u4};
+use midly::num::{u28, u4, u7};
 use midly::{
     parse, EventIter, Header, MetaMessage, MidiMessage, Timing, TrackEvent, TrackEventKind,
 };
@@ -274,7 +274,7 @@ impl SongMetaData {
 struct SongPlayer {
     sound_data: InstrumentSounds,
     free_buzzers: Deque<SoundBuzzer, 16>,
-    taken_buzzers: LinearMap<u4, SoundBuzzer, 16>,
+    taken_buzzers: LinearMap<(u4, u7), SoundBuzzer, 16>,
 }
 
 impl SongPlayer {
@@ -287,7 +287,7 @@ impl SongPlayer {
     }
 
     fn reset(&mut self) {
-        let mut keys = Deque::<u4, 16>::new();
+        let mut keys = Deque::<(u4, u7), 16>::new();
 
         for key in self.taken_buzzers.keys() {
             if keys.push_back(*key).is_err() {
@@ -304,12 +304,12 @@ impl SongPlayer {
 
     fn play_buzzers(&mut self) {
         for buzzer in self.taken_buzzers.values_mut() {
-            buzzer.update(1);
+            buzzer.update();
         }
     }
 
     fn free_buzzers(&mut self) {
-        let mut freed_keys = Deque::<u4, 16>::new();
+        let mut freed_keys = Deque::<(u4, u7), 16>::new();
 
         for key in self
             .taken_buzzers
@@ -354,7 +354,8 @@ impl SongPlayer {
         match event_kind {
             TrackEventKind::Midi { channel, message } => match message {
                 MidiMessage::NoteOff { key, vel } => {
-                    if let Some(mut free_buzzer) = self.taken_buzzers.remove(&channel) {
+                    println!("taken buzzers len: {:?}", self.taken_buzzers.len());
+                    if let Some(mut free_buzzer) = self.taken_buzzers.remove(&(channel, key)) {
                         println!("buzzer removed");
                         free_buzzer.reset();
                         let _ = self.free_buzzers.push_back(free_buzzer);
@@ -372,7 +373,11 @@ impl SongPlayer {
 
                         free_buzzer.set_frquency_from_note();
 
-                        if self.taken_buzzers.insert(channel, free_buzzer).is_err() {
+                        if self
+                            .taken_buzzers
+                            .insert((channel, key), free_buzzer)
+                            .is_err()
+                        {
                             println!("cannot insert buzzer");
                         };
                     } else {
@@ -478,32 +483,31 @@ struct Note {
 struct SoundBuzzer {
     buzzer_pin: AnyPin<Output<PushPull>>,
     period_micros: u16,
-    duty_percent: u8,
+    half_period_micros: u16,
     current_micros: u16,
-    output_state: bool,
     playing_note: Option<Note>,
+    pin_state: bool,
     finished_playing: bool,
 }
 
 impl SoundBuzzer {
-    fn new(pin: AnyPin<Output<PushPull>>, period_micros: u16, duty_percent: u8) -> Self {
+    fn new(pin: AnyPin<Output<PushPull>>, period_micros: u16) -> Self {
         Self {
             buzzer_pin: pin,
             period_micros,
-            duty_percent: duty_percent.clamp(0, 100),
+            half_period_micros: (period_micros / 2),
             current_micros: 0,
-            output_state: false,
             playing_note: None,
+            pin_state: false,
             finished_playing: true,
         }
     }
 
     fn reset(&mut self) {
-        self.duty_percent = 50;
         self.current_micros = 0;
         let _ = self.buzzer_pin.set_low();
-        self.output_state = false;
         self.playing_note = None;
+        self.pin_state = false;
         self.finished_playing = true;
     }
 
@@ -513,33 +517,29 @@ impl SoundBuzzer {
         }
     }
 
-    fn update(&mut self, micros_elapsed: u16) {
+    fn update(&mut self) {
         // todo: maybe optimize this, this taking time = 10000% more delay in songs
         // TODO: when changing the frequency to be from hz, remake this
 
-        self.current_micros = (self.current_micros + micros_elapsed) % self.period_micros;
-
-        let duty_micros = (self.period_micros as u32 * self.duty_percent as u32 / 100) as u16;
-        let new_state = self.current_micros < duty_micros;
-        if new_state != self.output_state && !self.finished_playing {
-            self.buzzer_pin.toggle().unwrap();
-            self.output_state = new_state;
+        self.current_micros += 1;
+        let new_state = self.current_micros > self.half_period_micros;
+        if !self.finished_playing && new_state != self.pin_state {
+            let _ = self.buzzer_pin.toggle();
+            self.pin_state = !self.pin_state;
+        } else if self.current_micros > self.period_micros {
+            self.current_micros = 0;
         }
     }
 
     fn adjust_period(&mut self, delta: i16) {
         self.period_micros = self.period_micros.saturating_add_signed(delta);
         self.period_micros = self.period_micros.clamp(100, 20000);
+        self.half_period_micros = self.period_micros / 2;
         println!(
             "Period: {}us ({}Hz)",
             self.period_micros,
             1_000_000 / self.period_micros as u32
         );
-    }
-
-    fn adjust_duty(&mut self, delta: i8) {
-        self.duty_percent = (self.duty_percent as i16 + delta as i16).clamp(0, 100) as u8;
-        println!("Duty cycle: {}%", self.duty_percent);
     }
 }
 
@@ -626,7 +626,10 @@ fn main() -> ! {
 
     let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
 
-    let pin0 = io.pins.gpio0.into_push_pull_output();
+    let pin14 = io.pins.gpio14.into_push_pull_output();
+    let pin27 = io.pins.gpio27.into_push_pull_output();
+    let pin16 = io.pins.gpio16.into_push_pull_output();
+
     let mut led = io.pins.gpio2.into_push_pull_output();
     let pin26 = io.pins.gpio26.into_push_pull_output();
 
@@ -677,11 +680,16 @@ fn main() -> ! {
 
     // ---------- set baseline states ----------
 
-    let pretend_buzzer_1 = SoundBuzzer::new(pin0.degrade(), 2000, 50);
+    let buzzer_1 = SoundBuzzer::new(pin14.degrade(), 2000);
+    let buzzer_2 = SoundBuzzer::new(pin27.degrade(), 2000);
+    let buzzer_3 = SoundBuzzer::new(pin16.degrade(), 2000);
 
     let mut analog_value_pin25 = Analog8::default();
     let mut buzzer_queue: Deque<SoundBuzzer, 16> = Deque::new();
-    let _ = buzzer_queue.push_back(pretend_buzzer_1);
+    let _ = buzzer_queue.push_back(buzzer_1);
+    //let _ = buzzer_queue.push_back(buzzer_2);
+    //let _ = buzzer_queue.push_back(buzzer_3);
+
     let mut song_player = SongPlayer::new(buzzer_queue);
 
     dac_25.write(analog_value_pin25.value);
@@ -691,7 +699,7 @@ fn main() -> ! {
     let mut last_dt_state = dt.is_high().unwrap();
     let mut last_sw_state = sw.is_low().unwrap();
 
-    let mut buzzer_0 = SoundBuzzer::new(pin26.degrade(), 2000, 50);
+    let mut buzzer_0 = SoundBuzzer::new(pin26.degrade(), 2000);
     buzzer_0.finished_playing = false;
     //buzzer_queue.push_back(buzzer_0);
 
@@ -725,7 +733,7 @@ fn main() -> ! {
             match rotation {
                 Rotation::Left => {
                     if led.is_set_high().unwrap() {
-                        buzzer_0.adjust_duty(-1);
+                        buzzer_0.finished_playing = true;
                     } else {
                         buzzer_0.adjust_period(20);
                     }
@@ -733,7 +741,7 @@ fn main() -> ! {
                 }
                 Rotation::Right => {
                     if led.is_set_high().unwrap() {
-                        buzzer_0.adjust_duty(1);
+                        buzzer_0.finished_playing = false;
                     } else {
                         buzzer_0.adjust_period(-20);
                     }
@@ -745,7 +753,7 @@ fn main() -> ! {
             dac_25.write(analog_value_pin25.value);
         }
 
-        buzzer_0.update(1);
+        buzzer_0.update();
 
         // reset current states
         last_dt_state = current_dt_state;
