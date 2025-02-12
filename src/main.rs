@@ -133,6 +133,13 @@ const MIDI_DATA: &[u8] = &[
 ];
 
 // =============================================================================================
+//                         WRITE REGISTERS FOR PIN 0 - 31 FOR FAST TOGGLING
+// =============================================================================================
+
+const GPIO_0_31_SET_REG: *mut u32 = 0x3FF44008 as *mut u32; // set bit
+const GPIO_0_31_CLEAR_REG: *mut u32 = 0x3FF4400C as *mut u32; // clear bit
+
+// =============================================================================================
 //                                      SONG METADATA
 // =============================================================================================
 
@@ -261,20 +268,21 @@ impl<'a> SongPlayer<'a> {
         for event in song_events.flatten() {
             let TrackEvent { delta, kind } = event;
 
-            let arbitrary_len = 2.7;
+            let arbitrary_len = 3.0;
 
             let mut delta_time =
                 (Self::delta_to_micros(delta.as_int(), metadata) as f32 * arbitrary_len) as i64;
             println!("{}", delta_time);
             if self.taken_buzzers.is_empty() {
                 while delta_time > 0 {
-                    delta_time -= 5;
+                    delta_time -= 6;
                     self.delay.delay_nanos(100);
                 }
             } else {
                 while delta_time > 0 {
                     self.play_buzzers();
-                    delta_time -= 1;
+                    self.delay.delay_micros(5);
+                    delta_time -= 20;
                 }
             }
 
@@ -375,7 +383,7 @@ struct InstrumentSounds {
 impl InstrumentSounds {
     fn new() -> Self {
         InstrumentSounds {
-            profiles: [SoundProfile { frequency: 5000 }; 128],
+            profiles: [SoundProfile { frequency: 3800 }; 128],
         }
     }
 }
@@ -422,10 +430,12 @@ struct SoundBuzzer<'a> {
     playing_note: Option<Note>,
     pin_state: bool,
     finished_playing: bool,
+    pin_mask: u32,
 }
 
 impl SoundBuzzer<'_> {
-    fn new(pin: AnyPin, period_micros: u16) -> Self {
+    fn new(pin: AnyPin, pin_num: u32, period_micros: u16) -> Self {
+        assert!((0..=31).contains(&pin_num)); // register only for pins 0 - 31
         Self {
             buzzer_pin: Output::new(pin, Level::Low),
             period_micros,
@@ -434,6 +444,7 @@ impl SoundBuzzer<'_> {
             playing_note: None,
             pin_state: false,
             finished_playing: true,
+            pin_mask: 1 << pin_num,
         }
     }
 
@@ -441,27 +452,36 @@ impl SoundBuzzer<'_> {
         self.current_micros = 0;
         self.playing_note = None;
         self.finished_playing = true;
-        //self.buzzer_pin.set_low();
-        //self.pin_state = false;
+        self.buzzer_pin.set_low();
+        self.pin_state = false;
     }
 
     fn set_frquency_from_note(&mut self) {
         if let Some(note) = &self.playing_note {
             self.period_micros = note.sound.frequency - ((6000 / 128) * (note.key as u16 - 64));
+            println!("period micros: {}", self.period_micros);
         }
     }
 
+    #[inline(always)]
     fn update(&mut self) {
-        // todo: maybe optimize this, this taking time = 10000% more delay in songs
         // TODO: when changing the frequency to be from hz, remake this
 
-        self.current_micros += 1;
-        let new_state = self.current_micros > self.half_period_micros;
-        if !self.finished_playing && new_state != self.pin_state {
-            self.buzzer_pin.toggle();
+        self.current_micros += 20;
+        if !self.finished_playing && self.current_micros > self.period_micros {
+            const REGISTERS: [*mut u32; 2] = [GPIO_0_31_CLEAR_REG, GPIO_0_31_SET_REG];
+            // we use unsafe instead of pin toggle because this is faster (measured)
+            // and the speed is needed with possibly thousands of toggles per seconds
+            // this is safe because the pin has been configured as an output and the buzzer owns the pin
+            // so no one else has access to the pin and the pin state cannot change
+            // we also guarantee that pin_num is always inside the valid registers (0..=31)
+            unsafe {
+                // toggels pin on / off
+                REGISTERS[self.pin_state as usize].write_volatile(self.pin_mask);
+            }
             self.pin_state = !self.pin_state;
-        } else if self.current_micros > self.period_micros {
-            self.current_micros = 0;
+
+            self.current_micros = 0
         }
     }
 
@@ -550,12 +570,11 @@ fn main() -> ! {
     // ---------- set up pins ----------
 
     let mut led = Output::new(peripherals.GPIO2, Level::Low);
-    let mut pin0 = Output::new(peripherals.GPIO0, Level::Low);
 
     // roatry encoder input pins
-    let clk = Input::new(peripherals.GPIO5, Pull::Up);
-    let dt = Input::new(peripherals.GPIO13, Pull::Up);
-    let sw = Input::new(peripherals.GPIO12, Pull::Up);
+    let clk = Input::new(peripherals.GPIO19, Pull::Up);
+    let dt = Input::new(peripherals.GPIO23, Pull::Up);
+    let sw = Input::new(peripherals.GPIO5, Pull::Up);
 
     // ---------- set up analog DAC pins ----------
 
@@ -620,17 +639,29 @@ fn main() -> ! {
 
     // ---------- set baseline states ----------
 
-    let buzzer_1 = SoundBuzzer::new(peripherals.GPIO14.degrade(), 2000);
-    let buzzer_2 = SoundBuzzer::new(peripherals.GPIO27.degrade(), 2000);
-    let buzzer_3 = SoundBuzzer::new(peripherals.GPIO16.degrade(), 2000);
+    let buzzer_1 = SoundBuzzer::new(peripherals.GPIO14.degrade(), 14, 2000);
+    //let buzzer_2 = SoundBuzzer::new(peripherals.GPIO14.degrade(), 14, 2000);
+    //let buzzer_3 = SoundBuzzer::new(peripherals.GPIO27.degrade(), 27, 2000);
+    //let buzzer_4 = SoundBuzzer::new(peripherals.GPIO16.degrade(), 16, 2000);
+    //let buzzer_5 = SoundBuzzer::new(peripherals.GPIO17.degrade(), 17, 2000);
+    //let buzzer_6 = SoundBuzzer::new(peripherals.GPIO26.degrade(), 26, 2000);
+    //let buzzer_7 = SoundBuzzer::new(peripherals.GPIO1.degrade(), 1, 2000);
+    //let buzzer_8 = SoundBuzzer::new(peripherals.GPIO3.degrade(), 3, 2000);
 
     let mut analog_value_pin25 = Analog8::default();
     let mut buzzer_queue: Deque<SoundBuzzer, 16> = Deque::new();
     let _ = buzzer_queue.push_back(buzzer_1);
-    //let _ = buzzer_queue.push_back(buzzer_2);
-    //let _ = buzzer_queue.push_back(buzzer_3);
+    // let _ = buzzer_queue.push_back(buzzer_2);
+    // let _ = buzzer_queue.push_back(buzzer_3);
+    // let _ = buzzer_queue.push_back(buzzer_4);
+    // let _ = buzzer_queue.push_back(buzzer_5);
+    // let _ = buzzer_queue.push_back(buzzer_6);
+    // let _ = buzzer_queue.push_back(buzzer_7);
+    // let _ = buzzer_queue.push_back(buzzer_8);
 
     let mut song_player = SongPlayer::new(buzzer_queue);
+    // todo: add a self healing meachanism that tries to catch up / slow down to get the correct beat
+    song_player.play_song(&mut track_meta_data, track);
 
     dac_25.write(analog_value_pin25.value);
 
@@ -639,13 +670,9 @@ fn main() -> ! {
     let mut last_dt_state = dt.is_high();
     let mut last_sw_state = sw.is_low();
 
-    let mut buzzer_0 = SoundBuzzer::new(peripherals.GPIO26.degrade(), 2000);
+    let mut buzzer_0 = SoundBuzzer::new(peripherals.GPIO26.degrade(), 26, 2000);
     buzzer_0.finished_playing = false;
     //buzzer_queue.push_back(buzzer_0);
-
-    // todo: add a self healing meachanism that tries to catch up / slow down to get the correct beat
-
-    song_player.play_song(&mut track_meta_data, track);
 
     println!("song over");
 
