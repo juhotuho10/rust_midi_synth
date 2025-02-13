@@ -1,5 +1,12 @@
 #![no_std]
 #![no_main]
+#![warn(
+    clippy::complexity,
+    clippy::correctness,
+    clippy::perf,
+    clippy::style,
+    clippy::suspicious
+)]
 
 use esp_backtrace as _;
 
@@ -21,7 +28,7 @@ use esp_hal::{
 use esp_println::println;
 use log::info;
 
-use heapless::{Deque, LinearMap, Vec};
+use heapless::{Deque, LinearMap, String, Vec};
 
 use midly::{
     num::{u28, u4, u7},
@@ -133,6 +140,171 @@ const MIDI_DATA: &[u8] = &[
 ];
 
 // =============================================================================================
+//                                      INSTRUMENT NAMES
+// =============================================================================================
+
+const GM_INSTRUMENTS: [&str; 128] = [
+    // Piano
+    "Acoustic Grand",
+    "Bright Acoustic",
+    "Electric Grand",
+    "Honky-Tonk",
+    "Electric Piano 1",
+    "Electric Piano 2",
+    "Harpsichord",
+    "Clavinet",
+    // Chromatic Percussion
+    "Celesta",
+    "Glockenspiel",
+    "Music Box",
+    "Vibraphone",
+    "Marimba",
+    "Xylophone",
+    "Tubular Bells",
+    "Dulcimer",
+    // Organ
+    "Drawbar Organ",
+    "Percussive Organ",
+    "Rock Organ",
+    "Church Organ",
+    "Reed Organ",
+    "Accordian",
+    "Harmonica",
+    "Tango Accordian",
+    // Guitar
+    "Nylon String Guitar",
+    "Steel String Guitar",
+    "Electric Jazz Guitar",
+    "Electric Clean Guitar",
+    "Electric Muted Guitar",
+    "Overdriven Guitar",
+    "Distortion Guitar",
+    "Guitar Harmonics",
+    // Bass
+    "Acoustic Bass",
+    "Electric Bass (finger)",
+    "Electric Bass (pick)",
+    "Fretless Bass",
+    "Slap Bass 1",
+    "Slap Bass 2",
+    "Synth Bass 1",
+    "Synth Bass 2",
+    // Solo Strings
+    "Violin",
+    "Viola",
+    "Cello",
+    "Contrabass",
+    "Tremolo Strings",
+    "Pizzicato Strings",
+    "Orchestral Strings",
+    "Timpani",
+    // Ensemble
+    "String Ensemble 1",
+    "String Ensemble 2",
+    "SynthStrings 1",
+    "SynthStrings 2",
+    "Choir Aahs",
+    "Voice Oohs",
+    "Synth Voice",
+    "Orchestra Hit",
+    // Brass
+    "Trumpet",
+    "Trombone",
+    "Tuba",
+    "Muted Trumpet",
+    "French Horn",
+    "Brass Section",
+    "SynthBrass 1",
+    "SynthBrass 2",
+    // Reed
+    "Soprano Sax",
+    "Alto Sax",
+    "Tenor Sax",
+    "Baritone Sax",
+    "Oboe",
+    "English Horn",
+    "Bassoon",
+    "Clarinet",
+    // Pipe
+    "Piccolo",
+    "Flute",
+    "Recorder",
+    "Pan Flute",
+    "Blown Bottle",
+    "Shakuhachi",
+    "Whistle",
+    "Ocarina",
+    // Synth Lead
+    "Square Wave",
+    "Saw Wave",
+    "Syn. Calliope",
+    "Chiffer Lead",
+    "Charang",
+    "Solo Vox",
+    "5th Saw Wave",
+    "Bass & Lead",
+    // Synth Pad
+    "Fantasia",
+    "Warm Pad",
+    "Polysynth",
+    "Space Voice",
+    "Bowed Glass",
+    "Metal Pad",
+    "Halo Pad",
+    "Sweep Pad",
+    // Synth Effects
+    "Ice Rain",
+    "Soundtrack",
+    "Crystal",
+    "Atmosphere",
+    "Brightness",
+    "Goblin",
+    "Echo Drops",
+    "Star Theme",
+    // Ethnic
+    "Sitar",
+    "Banjo",
+    "Shamisen",
+    "Koto",
+    "Kalimba",
+    "Bagpipe",
+    "Fiddle",
+    "Shanai",
+    // Percussive
+    "Tinkle Bell",
+    "Agogo",
+    "Steel Drums",
+    "Woodblock",
+    "Taiko Drum",
+    "Melodic Tom",
+    "Synth Drum",
+    "Reverse Cymbal",
+    // Sound Effects
+    "Guitar Fret Noise",
+    "Breath Noise",
+    "Seashore",
+    "Bird Tweet",
+    "Telephone Ring",
+    "Helicopter",
+    "Applause",
+    "Gunshot",
+];
+
+fn bytes_to_instrument_index(bytes: &[u8]) -> usize {
+    let byte_vec = Vec::<u8, 32>::from_slice(bytes).unwrap();
+    let byte_string = String::from_utf8(byte_vec).unwrap();
+    // Find the index in the list
+
+    match GM_INSTRUMENTS.iter().position(|item| item == &byte_string) {
+        Some(index) => index,
+        None => {
+            println!("instrument not found: {}", byte_string);
+            0
+        }
+    }
+}
+
+// =============================================================================================
 //                         WRITE REGISTERS FOR PIN 0 - 31 FOR FAST TOGGLING
 // =============================================================================================
 
@@ -154,6 +326,21 @@ struct SongMetaData {
 }
 
 impl SongMetaData {
+    fn new_empty(header: Header) -> Self {
+        let timing = match header.timing {
+            Timing::Metrical(metric_timing) => metric_timing.as_int(),
+            Timing::Timecode(_, _) => unimplemented!(),
+        };
+
+        SongMetaData {
+            ticks_per_quarter: timing,
+            tempo: 500_000,                // default tempo
+            bpm: 120,                      // default BPM
+            time_signature: [4, 4, 24, 8], // default: 4/4
+            key: (0, false),               // default: C major
+        }
+    }
+
     fn new(header: Header, meta_events: EventIter) -> Self {
         let timing = match header.timing {
             Timing::Metrical(metric_timing) => metric_timing.as_int(),
@@ -191,8 +378,8 @@ impl SongMetaData {
     }
 
     fn refresh_bpm(&mut self, tempo: u32) {
-        let micros_per_min = 60_000_000;
-        self.bpm = (micros_per_min / tempo) as u16;
+        const MICROS_PER_MIN: u32 = 60_000_000;
+        self.bpm = (MICROS_PER_MIN / tempo) as u16;
     }
 }
 
@@ -267,22 +454,21 @@ impl<'a> SongPlayer<'a> {
     fn play_song(&mut self, metadata: &mut SongMetaData, song_events: EventIter) {
         for event in song_events.flatten() {
             let TrackEvent { delta, kind } = event;
-
-            let arbitrary_len = 3.0;
+            let arbitrary_len = 15.0;
 
             let mut delta_time =
                 (Self::delta_to_micros(delta.as_int(), metadata) as f32 * arbitrary_len) as i64;
             println!("{}", delta_time);
             if self.taken_buzzers.is_empty() {
                 while delta_time > 0 {
-                    delta_time -= 6;
+                    delta_time -= 30;
                     self.delay.delay_nanos(100);
                 }
             } else {
                 while delta_time > 0 {
                     self.play_buzzers();
                     self.delay.delay_micros(5);
-                    delta_time -= 20;
+                    delta_time -= 100;
                 }
             }
 
@@ -296,7 +482,7 @@ impl<'a> SongPlayer<'a> {
         match event_kind {
             TrackEventKind::Midi { channel, message } => match message {
                 MidiMessage::NoteOff { key, vel } => {
-                    println!("taken buzzers len: {:?}", self.taken_buzzers.len());
+                    println!("taken buzzers len: {}", self.taken_buzzers.len());
                     if let Some(mut free_buzzer) = self.taken_buzzers.remove(&(channel, key)) {
                         println!("buzzer removed");
                         free_buzzer.reset();
@@ -343,6 +529,7 @@ impl<'a> SongPlayer<'a> {
             TrackEventKind::Meta(meta_message) => match meta_message {
                 MetaMessage::EndOfTrack => self.reset(),
                 MetaMessage::InstrumentName(items) => println!("not implemented: instrument name"), // todo: get the instruments that channels have
+                MetaMessage::TrackName(items) => println!("not implemented: instrument name"),
                 MetaMessage::Tempo(tempo) => metadata.tempo = tempo.as_int(),
                 MetaMessage::SmpteOffset(smpte_time) => todo!(),
                 MetaMessage::TimeSignature(a, b, c, d) => metadata.time_signature = [a, b, c, d],
@@ -352,7 +539,6 @@ impl<'a> SongPlayer<'a> {
                 MetaMessage::MidiPort(u7) => println!("not implemented: num midi ports"),
                 MetaMessage::TrackNumber(_) => println!("not implemented: track number"),
                 MetaMessage::Text(items) => println!("not implemented: text"),
-                MetaMessage::TrackName(items) => println!("not implemented: track name"),
 
                 _ => {}
             },
@@ -452,8 +638,8 @@ impl SoundBuzzer<'_> {
         self.current_micros = 0;
         self.playing_note = None;
         self.finished_playing = true;
-        self.buzzer_pin.set_low();
-        self.pin_state = false;
+        // self.buzzer_pin.set_low();
+        // self.pin_state = false;
     }
 
     fn set_frquency_from_note(&mut self) {
@@ -469,7 +655,7 @@ impl SoundBuzzer<'_> {
 
         self.current_micros += 20;
         if !self.finished_playing && self.current_micros > self.period_micros {
-            const REGISTERS: [*mut u32; 2] = [GPIO_0_31_CLEAR_REG, GPIO_0_31_SET_REG];
+            const REGISTERS: [*mut u32; 2] = [GPIO_0_31_SET_REG, GPIO_0_31_CLEAR_REG];
             // we use unsafe instead of pin toggle because this is faster (measured)
             // and the speed is needed with possibly thousands of toggles per seconds
             // this is safe because the pin has been configured as an output and the buzzer owns the pin

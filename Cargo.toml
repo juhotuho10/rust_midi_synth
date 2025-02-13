@@ -26,9 +26,9 @@ opt-level = "s"
 
 [profile.release]
 codegen-units    = 1     # LLVM can perform better optimizations using a single thread
-debug            = 2
+debug            = 1     # 2 = full, 1 = partial, 0 = none
 debug-assertions = false
 incremental      = false
 lto              = 'fat'
-opt-level        = 2
+opt-level        = 3     # might be faster on 3 or 2, 3 seems more consistent though, 2 is sometimes randomly slower
 overflow-checks  = false
