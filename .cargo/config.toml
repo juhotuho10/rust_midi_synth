@@ -7,6 +7,9 @@ ESP_LOG="INFO"
 [build]
 rustflags = [
   "-C", "link-arg=-nostartfiles",
+  "-C", "target-cpu=esp32",
+  "-C", "llvm-args=--inline-threshold=100",
+  "-C", "target-feature=+fp",
 ]
 
 target = "xtensa-esp32-none-elf"
