@@ -1052,7 +1052,7 @@ impl SongMetaData {
             Timing::Timecode(_, _) => unimplemented!(),
         };
 
-        SongMetaData {
+        Self {
             ticks_per_quarter: timing,
             tempo: 500_000,                // default tempo
             bpm: 120,                      // default BPM
@@ -1067,7 +1067,7 @@ impl SongMetaData {
             Timing::Timecode(_, _) => unimplemented!(),
         };
 
-        let mut metadata = SongMetaData {
+        let mut metadata = Self {
             ticks_per_quarter: timing,
             tempo: 500_000,                // default tempo
             bpm: 120,                      // default BPM
@@ -1167,7 +1167,7 @@ impl<'a> SongPlayer<'a> {
         }
     }
 
-    fn delta_to_micros(delta_ticks: u16, meta_data: &SongMetaData) -> u64 {
+    const fn delta_to_micros(delta_ticks: u16, meta_data: &SongMetaData) -> u64 {
         (delta_ticks as u64 * meta_data.tempo as u64) / meta_data.ticks_per_quarter as u64
     }
 
@@ -1354,8 +1354,8 @@ struct InstrumentSounds {
 }
 
 impl InstrumentSounds {
-    fn new() -> Self {
-        InstrumentSounds {
+    const fn new() -> Self {
+        Self {
             profiles: [SoundProfile { frequency: 3800 }; 128],
         }
     }
@@ -1479,7 +1479,7 @@ enum Rotation {
     Right,
 }
 
-fn get_knob_rotation(
+const fn get_knob_rotation(
     last_clk: bool,
     last_dt: bool,
     current_clk: bool,
@@ -1538,7 +1538,7 @@ fn main() -> ! {
 
     let track = track_iter.next().unwrap();
 
-    let mut track_meta_data = SongMetaData::new(header, meta_info);
+    let track_meta_data = SongMetaData::new(header, meta_info);
 
     println!("{:?}", track_meta_data);
 
