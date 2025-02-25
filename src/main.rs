@@ -1152,7 +1152,7 @@ impl<'a> SongPlayer<'a> {
         for key in self
             .taken_buzzers
             .iter()
-            .filter(|(_, buzzer)| buzzer.finished_playing)
+            .filter(|(_, buzzer)| buzzer.max_period < 0)
             .map(|(key, _)| key)
         {
             if freed_keys.push_back(*key).is_err() {
@@ -1260,15 +1260,13 @@ impl<'a> SongPlayer<'a> {
                 }
                 MidiMessage::NoteOn { key, vel } => {
                     if let Some(mut free_buzzer) = self.free_buzzers.pop_front() {
-                        free_buzzer.finished_playing = false;
                         let note_to_play = self.sound_data.profiles[0];
-                        free_buzzer.playing_note = Some(Note {
+
+                        free_buzzer.play_note(Note {
                             duration: None, // none = indefinite
                             sound: note_to_play,
                             key: key.as_int(),
                         });
-
-                        free_buzzer.set_frquency_from_note();
 
                         if self
                             .taken_buzzers
@@ -1386,7 +1384,7 @@ impl Analog8 {
 
 #[derive(Debug)]
 struct Note {
-    duration: Option<u16>,
+    duration: Option<i32>,
     sound: SoundProfile,
     key: u8,
 }
@@ -1398,42 +1396,37 @@ struct Note {
 struct SoundBuzzer<'a> {
     buzzer_pin: Output<'a>,
     period_micros: u16,
-    half_period_micros: u16,
+    max_period: i32,
     current_micros: u16,
-    playing_note: Option<Note>,
     pin_state: bool,
-    finished_playing: bool,
     pin_mask: u32,
 }
 
 impl SoundBuzzer<'_> {
-    fn new(pin: AnyPin, pin_num: u32, period_micros: u16) -> Self {
+    fn new(pin: AnyPin, pin_num: u32) -> Self {
         assert!((0..=31).contains(&pin_num)); // register only for pins 0 - 31
         Self {
             buzzer_pin: Output::new(pin, Level::Low),
-            period_micros,
-            half_period_micros: (period_micros / 2),
+            period_micros: 2000,
+            max_period: i32::MAX,
             current_micros: 0,
-            playing_note: None,
             pin_state: false,
-            finished_playing: true,
             pin_mask: 1 << pin_num,
         }
     }
 
     fn reset(&mut self) {
         self.current_micros = 0;
-        self.playing_note = None;
-        self.finished_playing = true;
+        self.max_period = i32::MAX;
+
         // self.buzzer_pin.set_low();
         // self.pin_state = false;
     }
 
-    fn set_frquency_from_note(&mut self) {
-        if let Some(note) = &self.playing_note {
-            self.period_micros = note.sound.frequency - ((6000 / 128) * (note.key as u16 - 64));
-            println!("period micros: {}", self.period_micros);
-        }
+    fn play_note(&mut self, note: Note) {
+        self.period_micros = note.sound.frequency - ((6000 / 128) * (note.key as u16 - 64));
+        self.max_period = note.duration.unwrap_or(i32::MAX);
+        println!("period micros: {}", self.period_micros);
     }
 
     #[inline(always)]
@@ -1441,7 +1434,8 @@ impl SoundBuzzer<'_> {
         // TODO: when changing the frequency to be from hz, remake this
 
         self.current_micros += 20;
-        if !self.finished_playing && self.current_micros > self.period_micros {
+
+        if self.max_period > 0 && self.current_micros > self.period_micros {
             const REGISTERS: [*mut u32; 2] = [GPIO_0_31_SET_REG, GPIO_0_31_CLEAR_REG];
             // we use unsafe instead of pin toggle because this is faster (measured)
             // and the speed is needed with possibly thousands of toggles per seconds
@@ -1453,15 +1447,14 @@ impl SoundBuzzer<'_> {
                 REGISTERS[self.pin_state as usize].write_volatile(self.pin_mask);
             }
             self.pin_state = !self.pin_state;
-
             self.current_micros = 0
         }
+        self.max_period -= 20;
     }
 
     fn adjust_period(&mut self, delta: i16) {
         self.period_micros = self.period_micros.saturating_add_signed(delta);
         self.period_micros = self.period_micros.clamp(100, 20000);
-        self.half_period_micros = self.period_micros / 2;
         println!(
             "Period: {}us ({}Hz)",
             self.period_micros,
@@ -1614,14 +1607,14 @@ fn main() -> ! {
 
     // ---------- set baseline states ----------
 
-    let buzzer_1 = SoundBuzzer::new(peripherals.GPIO5.degrade(), 5, 2000);
-    let buzzer_2 = SoundBuzzer::new(peripherals.GPIO13.degrade(), 13, 2000);
-    let buzzer_3 = SoundBuzzer::new(peripherals.GPIO14.degrade(), 14, 2000);
-    let buzzer_4 = SoundBuzzer::new(peripherals.GPIO27.degrade(), 27, 2000);
-    let buzzer_5 = SoundBuzzer::new(peripherals.GPIO16.degrade(), 16, 2000);
-    let buzzer_6 = SoundBuzzer::new(peripherals.GPIO17.degrade(), 17, 2000);
-    let buzzer_7 = SoundBuzzer::new(peripherals.GPIO26.degrade(), 26, 2000);
-    let buzzer_8 = SoundBuzzer::new(peripherals.GPIO3.degrade(), 3, 2000);
+    let buzzer_1 = SoundBuzzer::new(peripherals.GPIO5.degrade(), 5);
+    let buzzer_2 = SoundBuzzer::new(peripherals.GPIO13.degrade(), 13);
+    let buzzer_3 = SoundBuzzer::new(peripherals.GPIO14.degrade(), 14);
+    let buzzer_4 = SoundBuzzer::new(peripherals.GPIO27.degrade(), 27);
+    let buzzer_5 = SoundBuzzer::new(peripherals.GPIO16.degrade(), 16);
+    let buzzer_6 = SoundBuzzer::new(peripherals.GPIO17.degrade(), 17);
+    let buzzer_7 = SoundBuzzer::new(peripherals.GPIO26.degrade(), 26);
+    let buzzer_8 = SoundBuzzer::new(peripherals.GPIO3.degrade(), 3);
 
     let mut analog_value_pin25 = Analog8::default();
     let mut buzzer_queue: Deque<SoundBuzzer, 16> = Deque::new();
@@ -1645,8 +1638,9 @@ fn main() -> ! {
     let mut last_dt_state = dt.is_high();
     let mut last_sw_state = sw.is_low();
 
-    let mut buzzer_0 = SoundBuzzer::new(peripherals.GPIO4.degrade(), 26, 2000);
-    buzzer_0.finished_playing = false;
+    let mut buzzer_0 = SoundBuzzer::new(peripherals.GPIO4.degrade(), 4);
+    buzzer_0.max_period = 1_000_000;
+
     //buzzer_queue.push_back(buzzer_0);
 
     println!("song over");
@@ -1658,8 +1652,11 @@ fn main() -> ! {
         let current_sw_state = sw.is_low();
 
         // pin logic
-        if sw.is_low() && current_sw_state != last_sw_state {
-            //led.toggle();
+        if sw.is_high() && current_sw_state != last_sw_state {
+            led.toggle();
+            buzzer_0.max_period = 1_000_000;
+
+            println!("playing: {}", buzzer_0.max_period > 0)
         }
 
         if let Some(rotation) = get_knob_rotation(
@@ -1670,19 +1667,13 @@ fn main() -> ! {
         ) {
             match rotation {
                 Rotation::Left => {
-                    if led.is_set_high() {
-                        buzzer_0.finished_playing = true;
-                    } else {
-                        buzzer_0.adjust_period(20);
-                    }
+                    buzzer_0.adjust_period(20);
+
                     analog_value_pin25.dec();
                 }
                 Rotation::Right => {
-                    if led.is_set_high() {
-                        buzzer_0.finished_playing = false;
-                    } else {
-                        buzzer_0.adjust_period(-20);
-                    }
+                    buzzer_0.adjust_period(-20);
+
                     analog_value_pin25.inc();
                 }
             }
@@ -1698,6 +1689,6 @@ fn main() -> ! {
         last_sw_state = current_sw_state;
         last_clk_state = current_clk_state;
 
-        delay.delay_micros(1);
+        delay.delay_micros(3);
     }
 }
