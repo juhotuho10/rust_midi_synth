@@ -9,7 +9,10 @@
 )]
 
 mod data;
-use data::*;
+use data::MIDI_DATA;
+
+mod sound_profiles;
+use sound_profiles::{InstrumentSounds, SoundProfile};
 
 use esp_backtrace as _;
 
@@ -38,20 +41,6 @@ use midly::{
     parse, EventIter, Header, MetaMessage, MidiMessage, Timing, TrackEvent, TrackEventKind,
     TrackIter,
 };
-
-fn bytes_to_instrument_index(bytes: &[u8]) -> usize {
-    let byte_vec = Vec::<u8, 32>::from_slice(bytes).unwrap();
-    let byte_string = String::from_utf8(byte_vec).unwrap();
-    // Find the index in the list
-
-    match INSTRUMENTS.iter().position(|item| item == &byte_string) {
-        Some(index) => index,
-        None => {
-            println!("instrument not found: {}", byte_string);
-            0
-        }
-    }
-}
 
 // =============================================================================================
 //                         WRITE REGISTERS FOR PIN 0 - 31 FOR FAST TOGGLING
@@ -285,10 +274,9 @@ impl<'a> SongPlayer<'a> {
                 }
                 MidiMessage::NoteOn { key, vel } => {
                     if let Some(mut free_buzzer) = self.free_buzzers.pop_front() {
-                        let note_to_play = self.sound_data.profiles[0];
+                        let note_to_play = self.sound_data.profiles["Acoustic Grand"];
 
                         free_buzzer.play_note(Note {
-                            duration: None, // none = indefinite
                             sound: note_to_play,
                             key: key.as_int(),
                         });
@@ -359,32 +347,6 @@ impl<'a> SongPlayer<'a> {
 }
 
 // =============================================================================================
-//                                SOUND PROFILE FOR INSTRUMENTS
-// =============================================================================================
-
-#[derive(Debug, Clone, Copy)]
-struct SoundProfile {
-    frequency: u16,
-}
-
-// =============================================================================================
-//                        SOUND PROFILE COLLECTION FOR ALL INSTURMENTS
-// =============================================================================================
-
-#[derive(Debug)]
-struct InstrumentSounds {
-    profiles: [SoundProfile; 128],
-}
-
-impl InstrumentSounds {
-    const fn new() -> Self {
-        Self {
-            profiles: [SoundProfile { frequency: 3800 }; 128],
-        }
-    }
-}
-
-// =============================================================================================
 //                              ANALOG PIN WITH VALUES 0 - 255
 // =============================================================================================
 
@@ -409,7 +371,6 @@ impl Analog8 {
 
 #[derive(Debug)]
 struct Note {
-    duration: Option<i32>,
     sound: SoundProfile,
     key: u8,
 }
@@ -450,7 +411,7 @@ impl SoundBuzzer<'_> {
 
     fn play_note(&mut self, note: Note) {
         self.period_micros = note.sound.frequency - ((6000 / 128) * (note.key as u16 - 64));
-        self.max_period = note.duration.unwrap_or(i32::MAX);
+        self.max_period = note.sound.duration.unwrap_or(i32::MAX);
         println!("period micros: {}", self.period_micros);
     }
 
