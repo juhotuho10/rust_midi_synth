@@ -12,7 +12,7 @@ mod data;
 use data::MIDI_DATA;
 
 mod sound_profiles;
-use sound_profiles::{InstrumentSounds, SoundProfile};
+use sound_profiles::{SoundProfile, INSTRUMENTS};
 
 use esp_backtrace as _;
 
@@ -126,7 +126,7 @@ impl SongMetaData {
 // =============================================================================================
 
 struct SongPlayer<'a> {
-    sound_data: InstrumentSounds,
+    instrument_sounds: [SoundProfile; 16],
     free_buzzers: Deque<SoundBuzzer<'a>, 16>,
     taken_buzzers: LinearMap<(u4, u7), SoundBuzzer<'a>, 16>,
     delay: Delay,
@@ -135,7 +135,10 @@ struct SongPlayer<'a> {
 impl<'a> SongPlayer<'a> {
     fn new(buzzers: Deque<SoundBuzzer<'a>, 16>) -> Self {
         SongPlayer {
-            sound_data: InstrumentSounds::new(),
+            instrument_sounds: [SoundProfile {
+                frequency: 3800,
+                duration: None,
+            }; 16],
             free_buzzers: buzzers,
             taken_buzzers: LinearMap::new(),
             delay: Delay::new(),
@@ -274,7 +277,7 @@ impl<'a> SongPlayer<'a> {
                 }
                 MidiMessage::NoteOn { key, vel } => {
                     if let Some(mut free_buzzer) = self.free_buzzers.pop_front() {
-                        let note_to_play = self.sound_data.profiles["Acoustic Grand"];
+                        let note_to_play = self.instrument_sounds[channel.as_int() as usize];
 
                         free_buzzer.play_note(Note {
                             sound: note_to_play,
@@ -299,8 +302,10 @@ impl<'a> SongPlayer<'a> {
                     println!("not implemented: midi controller")
                 }
                 MidiMessage::ProgramChange { program } => {
-                    println!("not implemented: midi program change")
+                    self.instrument_sounds[channel.as_int() as usize] =
+                        INSTRUMENTS[program.as_int() as usize]
                 }
+
                 MidiMessage::ChannelAftertouch { vel } => {
                     println!("not implemented: midi channel aftertouch")
                 }
@@ -308,8 +313,8 @@ impl<'a> SongPlayer<'a> {
             },
             TrackEventKind::Meta(meta_message) => match meta_message {
                 MetaMessage::EndOfTrack => println!("End of track"),
-                MetaMessage::InstrumentName(items) => println!("not implemented: instrument name"), // todo: get the instruments that channels have
-                MetaMessage::TrackName(items) => println!("not implemented: instrument name"),
+                MetaMessage::InstrumentName(bytes) => println!("not implemented: name"),
+                MetaMessage::TrackName(bytes) => println!("not implemented: name"),
                 MetaMessage::Tempo(tempo) => metadata.tempo = tempo.as_int(),
                 MetaMessage::SmpteOffset(smpte_time) => todo!(),
                 MetaMessage::TimeSignature(a, b, c, d) => metadata.time_signature = [a, b, c, d],
