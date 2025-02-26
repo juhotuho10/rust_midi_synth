@@ -136,8 +136,9 @@ impl<'a> SongPlayer<'a> {
     fn new(buzzers: Deque<SoundBuzzer<'a>, 16>) -> Self {
         SongPlayer {
             instrument_sounds: [SoundProfile {
-                frequency: 3800,
+                wait_time: 3800,
                 duration: None,
+                key_micro_chance: 50,
             }; 16],
             free_buzzers: buzzers,
             taken_buzzers: LinearMap::new(),
@@ -415,7 +416,8 @@ impl SoundBuzzer<'_> {
     }
 
     fn play_note(&mut self, note: Note) {
-        self.period_micros = note.sound.frequency - ((6000 / 128) * (note.key as u16 - 64));
+        self.period_micros =
+            note.sound.wait_time - (note.sound.key_micro_chance as u16 * (note.key as u16 - 64));
         self.max_period = note.sound.duration.unwrap_or(i32::MAX);
         println!("period micros: {}", self.period_micros);
     }
@@ -630,7 +632,7 @@ fn main() -> ! {
     let mut last_sw_state = sw.is_low();
 
     let mut buzzer_0 = SoundBuzzer::new(peripherals.GPIO4.degrade(), 4);
-    buzzer_0.max_period = 1_000_000;
+    buzzer_0.max_period = 1_000_000_000;
 
     //buzzer_queue.push_back(buzzer_0);
 
@@ -645,7 +647,7 @@ fn main() -> ! {
         // pin logic
         if sw.is_high() && current_sw_state != last_sw_state {
             led.toggle();
-            buzzer_0.max_period = 1_000_000;
+            buzzer_0.max_period = 1_000_000_000;
 
             println!("playing: {}", buzzer_0.max_period > 0)
         }
@@ -659,12 +661,10 @@ fn main() -> ! {
             match rotation {
                 Rotation::Left => {
                     buzzer_0.adjust_period(20);
-
                     analog_value_pin25.dec();
                 }
                 Rotation::Right => {
                     buzzer_0.adjust_period(-20);
-
                     analog_value_pin25.inc();
                 }
             }
