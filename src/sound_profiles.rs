@@ -1,8 +1,3 @@
-use esp_println::println;
-use heapless::{FnvIndexMap, String, Vec};
-
-const INSTRUMENT_COUNT: usize = 128;
-
 // =============================================================================================
 //                                SOUND PROFILE FOR INSTRUMENTS
 // =============================================================================================
@@ -28,24 +23,7 @@ impl SoundProfile {
 //                        SOUND PROFILE COLLECTION FOR ALL INSTURMENTS
 // =============================================================================================
 
-// #[derive(Debug)]
-// pub struct InstrumentSounds {
-//     pub profiles: [SoundProfile; INSTRUMENT_COUNT],
-// }
-//
-// impl InstrumentSounds {
-//     pub fn new() -> Self {
-//         Self {
-//             profiles: INSTRUMENTS,
-//         }
-//     }
-// }
-
-// =============================================================================================
-//                                      INSTRUMENT NAMES
-// =============================================================================================
-
-pub const INSTRUMENTS: [SoundProfile; INSTRUMENT_COUNT] = [
+pub const INSTRUMENTS: [SoundProfile; 128] = [
     //  ======== Piano ========
 
     // Acoustic Grand

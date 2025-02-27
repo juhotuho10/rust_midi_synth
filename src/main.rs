@@ -28,7 +28,6 @@ use esp_hal::{
     },
     main,
     mcpwm::{operator::PwmPinConfig, timer::PwmWorkingMode, McPwm, PeripheralClockConfig},
-    time::RateExtU32,
 };
 
 use esp_println::println;
@@ -201,7 +200,7 @@ impl<'a> SongPlayer<'a> {
 
         let mut next_events: [Option<(u16, TrackEventKind<'_>)>; 16] = [None; 16];
 
-        // todo: take while delta = 0 from first track, see if there are meta info there
+        // todo: take while delta = 0 from first track, see if there are meta info there, maybe
         let mut tracks: Vec<EventIter<'_>, 16> = track_iter.flatten().collect();
 
         for (i, t) in tracks.iter_mut().enumerate() {
@@ -278,20 +277,9 @@ impl<'a> SongPlayer<'a> {
                 }
                 MidiMessage::NoteOn { key, vel } => {
                     if let Some(mut free_buzzer) = self.free_buzzers.pop_front() {
-                        let note_to_play = self.instrument_sounds[channel.as_int() as usize];
-
-                        free_buzzer.play_note(Note {
-                            sound: note_to_play,
-                            key: key.as_int(),
-                        });
-
-                        if self
-                            .taken_buzzers
-                            .insert((channel, key), free_buzzer)
-                            .is_err()
-                        {
-                            println!("cannot insert buzzer");
-                        };
+                        let note_to_play = &self.instrument_sounds[channel.as_int() as usize];
+                        free_buzzer.play_note(note_to_play, key);
+                        let _ = self.taken_buzzers.insert((channel, key), free_buzzer);
                     } else {
                         println!("no free buzzers")
                     }
@@ -372,16 +360,6 @@ impl Analog8 {
 }
 
 // =============================================================================================
-//                       NOTES THAT BUZZERS CAN BE INSTRUCTED TO PLAY
-// =============================================================================================
-
-#[derive(Debug)]
-struct Note {
-    sound: SoundProfile,
-    key: u8,
-}
-
-// =============================================================================================
 //                           PIN OWNING BUZZERS FOR PLAYING NOTES
 // =============================================================================================
 
@@ -415,10 +393,10 @@ impl SoundBuzzer<'_> {
         // self.pin_state = false;
     }
 
-    fn play_note(&mut self, note: Note) {
-        self.period_micros =
-            note.sound.wait_time - (note.sound.key_micro_chance as u16 * (note.key as u16 - 64));
-        self.max_period = note.sound.duration.unwrap_or(i32::MAX);
+    fn play_note(&mut self, sound_profile: &SoundProfile, key: u7) {
+        self.period_micros = sound_profile.wait_time
+            - (sound_profile.key_micro_chance as u16 * (key.as_int() as u16 - 64));
+        self.max_period = sound_profile.duration.unwrap_or(i32::MAX);
         println!("period micros: {}", self.period_micros);
     }
 
