@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(asm_experimental_arch)]
 #![warn(
     clippy::complexity,
     clippy::correctness,
@@ -19,7 +20,6 @@ use esp_backtrace as _;
 use esp_hal::{
     analog::dac::Dac,
     clock::CpuClock,
-    delay::Delay,
     gpio::{AnyPin, Event, Input, Io, Level, Output, Pin, Pull},
     ledc::{
         channel::{ChannelHW, ChannelIFace},
@@ -47,6 +47,27 @@ use midly::{
 
 const GPIO_0_31_SET_REG: *mut u32 = 0x3FF44008 as *mut u32; // set bit
 const GPIO_0_31_CLEAR_REG: *mut u32 = 0x3FF4400C as *mut u32; // clear bit
+
+// =============================================================================================
+//                                              TIMER
+// =============================================================================================
+
+// esp_hal has timers and delays, but they were 1 micro second accuracy at best, while I need tunable ~50 nano second accuracy
+
+#[inline(always)]
+pub fn delay_cycles(cycles: u32) {
+    let start = read_ccount();
+    while read_ccount().wrapping_sub(start) < cycles {}
+}
+
+#[inline(always)]
+fn read_ccount() -> u32 {
+    let count: u32;
+    unsafe {
+        core::arch::asm!("rsr.ccount {0}", out(reg) count);
+    }
+    count
+}
 
 // =============================================================================================
 //                                      SONG METADATA
@@ -128,7 +149,6 @@ struct SongPlayer<'a> {
     instrument_sounds: [SoundProfile; 16],
     free_buzzers: Deque<SoundBuzzer<'a>, 16>,
     taken_buzzers: LinearMap<(u4, u7), SoundBuzzer<'a>, 16>,
-    delay: Delay,
 }
 
 impl<'a> SongPlayer<'a> {
@@ -141,7 +161,6 @@ impl<'a> SongPlayer<'a> {
             }; 16],
             free_buzzers: buzzers,
             taken_buzzers: LinearMap::new(),
-            delay: Delay::new(),
         }
     }
 
@@ -246,14 +265,14 @@ impl<'a> SongPlayer<'a> {
             if self.taken_buzzers.is_empty() {
                 while delta_time > 0 {
                     delta_time -= 25;
-                    self.delay.delay_nanos(100);
+                    delay_cycles(290);
                 }
             } else {
                 // 1 = 5 micros
                 // 8 = 3 micros
                 while delta_time > 0 {
                     self.play_buzzers();
-                    self.delay.delay_micros(3);
+                    delay_cycles(870);
                     delta_time -= 100;
                 }
             }
@@ -490,7 +509,6 @@ fn main() -> ! {
     let peripherals = esp_hal::init(config);
 
     esp_println::logger::init_logger_from_env();
-    let delay = Delay::new();
 
     // ---------- load track ----------
 
@@ -606,7 +624,7 @@ fn main() -> ! {
 
     let mut song_player = SongPlayer::new(buzzer_queue);
     // todo: add a self healing meachanism that tries to catch up / slow down to get the correct beat
-    song_player.play_song(MIDI_DATA);
+    //song_player.play_song(MIDI_DATA);
 
     dac_25.write(analog_value_pin25.value);
 
@@ -664,6 +682,6 @@ fn main() -> ! {
         last_sw_state = current_sw_state;
         last_clk_state = current_clk_state;
 
-        delay.delay_micros(6);
+        delay_cycles(1700);
     }
 }
