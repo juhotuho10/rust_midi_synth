@@ -57,7 +57,9 @@ const GPIO_0_31_CLEAR_REG: *mut u32 = 0x3FF4400C as *mut u32; // clear bit
 #[inline(always)]
 pub fn delay_cycles(cycles: u32) {
     let start = read_ccount();
-    while read_ccount().wrapping_sub(start) < cycles {}
+    while read_ccount().wrapping_sub(start) < cycles {
+        core::hint::spin_loop();
+    }
 }
 
 #[inline(always)]
@@ -624,7 +626,7 @@ fn main() -> ! {
 
     let mut song_player = SongPlayer::new(buzzer_queue);
     // todo: add a self healing meachanism that tries to catch up / slow down to get the correct beat
-    //song_player.play_song(MIDI_DATA);
+    song_player.play_song(MIDI_DATA);
 
     dac_25.write(analog_value_pin25.value);
 
