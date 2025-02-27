@@ -195,7 +195,7 @@ impl<'a> SongPlayer<'a> {
     fn play_song(&mut self, midi_track: &[u8]) {
         // ------------------- parse the track -------------------
 
-        let (header, track_iter) = parse(midi_track).unwrap();
+        let (header, track_iter) = parse(midi_track).expect("valid midi track");
         let mut metadata = SongMetaData::new_empty(header);
 
         let mut next_events: [Option<(u16, TrackEventKind<'_>)>; 16] = [None; 16];
@@ -204,15 +204,16 @@ impl<'a> SongPlayer<'a> {
         let mut tracks: Vec<EventIter<'_>, 16> = track_iter.flatten().collect();
 
         for (i, t) in tracks.iter_mut().enumerate() {
-            let first_event = t.next().unwrap().unwrap();
-            next_events[i] = Some((first_event.delta.as_int() as u16, first_event.kind));
+            if let Some(Ok(first_event)) = t.next() {
+                next_events[i] = Some((first_event.delta.as_int() as u16, first_event.kind));
+            }
         }
 
         // ------------------- play all the track events in order -------------------
         while next_events.iter().any(|x| x.is_some()) {
             // pick the next event with the lowest delta
             let next_track_idx = Self::find_min_index(&next_events);
-            let (delay, event_kind) = next_events[next_track_idx].unwrap();
+            let (delay, event_kind) = next_events[next_track_idx].expect("cannot fail");
 
             // ------------------- apply the delay to each of the items -------------------
             if delay != 0 {
