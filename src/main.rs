@@ -137,7 +137,7 @@ impl<'a> SongPlayer<'a> {
             instrument_sounds: [SoundProfile {
                 wait_time: 3800,
                 duration: None,
-                key_micro_chance: 50,
+                key_micro_change: 50,
             }; 16],
             free_buzzers: buzzers,
             taken_buzzers: LinearMap::new(),
@@ -394,8 +394,13 @@ impl SoundBuzzer<'_> {
     }
 
     fn play_note(&mut self, sound_profile: &SoundProfile, key: u7) {
-        self.period_micros = sound_profile.wait_time
-            - (sound_profile.key_micro_chance as u16 * (key.as_int() as u16 - 64));
+        // key between 0 and 127, so 63 is the middle point
+        // less than 63 = note goes down, so wait time goes up
+        // more than 63 = not goes up, so wait time goes down
+
+        self.period_micros =
+            sound_profile.wait_time - (sound_profile.key_micro_change * (key.as_int() as u16 - 63));
+
         self.max_period = sound_profile.duration.unwrap_or(i32::MAX);
         println!("period micros: {}", self.period_micros);
     }
@@ -658,6 +663,6 @@ fn main() -> ! {
         last_sw_state = current_sw_state;
         last_clk_state = current_clk_state;
 
-        delay.delay_micros(3);
+        delay.delay_micros(6);
     }
 }
