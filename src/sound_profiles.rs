@@ -6,7 +6,7 @@
 pub struct SoundProfile {
     pub wait_time: u16,
     pub duration: Option<i32>,
-    pub key_micro_change: u16,
+    pub wait_change_per_key: u16,
 }
 
 impl SoundProfile {
@@ -16,7 +16,7 @@ impl SoundProfile {
         SoundProfile {
             wait_time,
             duration,
-            key_micro_change: change as u16,
+            wait_change_per_key: change as u16,
         }
     }
 }

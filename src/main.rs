@@ -33,7 +33,7 @@ use esp_hal::{
 use esp_println::println;
 use log::info;
 
-use heapless::{Deque, LinearMap, String, Vec};
+use heapless::{Deque, LinearMap, Vec};
 
 use midly::{
     num::{u28, u4, u7},
@@ -53,6 +53,7 @@ const GPIO_0_31_CLEAR_REG: *mut u32 = 0x3FF4400C as *mut u32; // clear bit
 // =============================================================================================
 
 // esp_hal has timers and delays, but they were 1 micro second accuracy at best, while I need tunable ~50 nano second accuracy
+// not as portable as esp_hal delay, but definitely more accurate
 
 #[inline(always)]
 pub fn delay_cycles(cycles: u32) {
@@ -75,18 +76,17 @@ fn read_ccount() -> u32 {
 //                                      SONG METADATA
 // =============================================================================================
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 struct SongMetaData {
     ticks_per_quarter: u16,  // ticks per quarter note
     tempo: u32,              // micro seconds per quarter note
-    bpm: u16,                // ms / min = 60_000_000, so BPM = 60_000_000 / tempo
+    _bpm: u16,               // ms / min = 60_000_000, so BPM = 60_000_000 / tempo
     time_signature: [u8; 4], // [beats per measure, denominator of the time signature as 1/2^n,midi clock per quarter note, Number of Notated 32nd Notes in a MIDI Quarter Note]
     key: (i8, bool),         // ((-n_of_flats, + n_of_sharps), major / minor)
 }
 
 impl SongMetaData {
-    fn new_empty(header: Header) -> Self {
+    fn new(header: Header) -> Self {
         let timing = match header.timing {
             Timing::Metrical(metric_timing) => metric_timing.as_int(),
             Timing::Timecode(_, _) => unimplemented!(),
@@ -95,51 +95,15 @@ impl SongMetaData {
         Self {
             ticks_per_quarter: timing,
             tempo: 500_000,                // default tempo
-            bpm: 120,                      // default BPM
+            _bpm: 120,                     // default BPM
             time_signature: [4, 4, 24, 8], // default: 4/4
             key: (0, false),               // default: C major
         }
-    }
-
-    fn new(header: Header, meta_events: EventIter) -> Self {
-        let timing = match header.timing {
-            Timing::Metrical(metric_timing) => metric_timing.as_int(),
-            Timing::Timecode(_, _) => unimplemented!(),
-        };
-
-        let mut metadata = Self {
-            ticks_per_quarter: timing,
-            tempo: 500_000,                // default tempo
-            bpm: 120,                      // default BPM
-            time_signature: [4, 4, 24, 8], // default: 4/4
-            key: (0, false),               // default: C major
-        };
-
-        for event in meta_events.flatten() {
-            if let TrackEventKind::Meta(meta_event) = event.kind {
-                match meta_event {
-                    MetaMessage::Tempo(tempo) => {
-                        metadata.tempo = tempo.as_int();
-                    }
-                    MetaMessage::TimeSignature(num, den, clocks, notes_32nd) => {
-                        metadata.time_signature = [num, den, clocks, notes_32nd];
-                    }
-                    MetaMessage::KeySignature(sharps_flats, minor) => {
-                        metadata.key = (sharps_flats, minor);
-                    }
-                    _ => (),
-                }
-            }
-        }
-
-        metadata.refresh_bpm(metadata.tempo);
-
-        metadata
     }
 
     fn refresh_bpm(&mut self, tempo: u32) {
         const MICROS_PER_MIN: u32 = 60_000_000;
-        self.bpm = (MICROS_PER_MIN / tempo) as u16;
+        self._bpm = (MICROS_PER_MIN / tempo) as u16;
     }
 }
 
@@ -159,7 +123,7 @@ impl<'a> SongPlayer<'a> {
             instrument_sounds: [SoundProfile {
                 wait_time: 3800,
                 duration: None,
-                key_micro_change: 50,
+                wait_change_per_key: 50,
             }; 16],
             free_buzzers: buzzers,
             taken_buzzers: LinearMap::new(),
@@ -217,7 +181,7 @@ impl<'a> SongPlayer<'a> {
         // ------------------- parse the track -------------------
 
         let (header, track_iter) = parse(midi_track).expect("valid midi track");
-        let mut metadata = SongMetaData::new_empty(header);
+        let mut metadata = SongMetaData::new(header);
 
         let mut next_events: [Option<(u16, TrackEventKind<'_>)>; 16] = [None; 16];
 
@@ -270,8 +234,6 @@ impl<'a> SongPlayer<'a> {
                     delay_cycles(290);
                 }
             } else {
-                // 1 = 5 micros
-                // 8 = 3 micros
                 while delta_time > 0 {
                     self.play_buzzers();
                     delay_cycles(870);
@@ -306,15 +268,16 @@ impl<'a> SongPlayer<'a> {
                         println!("no free buzzers")
                     }
                 }
+                MidiMessage::ProgramChange { program } => {
+                    // gets the instrument index for the channel
+                    self.instrument_sounds[channel.as_int() as usize] =
+                        INSTRUMENTS[program.as_int() as usize]
+                }
                 MidiMessage::Aftertouch { key, vel } => {
                     println!("not implemented: midi aftertouch")
                 }
                 MidiMessage::Controller { controller, value } => {
                     println!("not implemented: midi controller")
-                }
-                MidiMessage::ProgramChange { program } => {
-                    self.instrument_sounds[channel.as_int() as usize] =
-                        INSTRUMENTS[program.as_int() as usize]
                 }
 
                 MidiMessage::ChannelAftertouch { vel } => {
@@ -323,18 +286,16 @@ impl<'a> SongPlayer<'a> {
                 MidiMessage::PitchBend { bend } => println!("not implemented: midi pitch bend"),
             },
             TrackEventKind::Meta(meta_message) => match meta_message {
-                MetaMessage::EndOfTrack => println!("End of track"),
-                MetaMessage::InstrumentName(bytes) => println!("not implemented: name"),
-                MetaMessage::TrackName(bytes) => println!("not implemented: name"),
                 MetaMessage::Tempo(tempo) => metadata.tempo = tempo.as_int(),
-                MetaMessage::SmpteOffset(smpte_time) => todo!(),
                 MetaMessage::TimeSignature(a, b, c, d) => metadata.time_signature = [a, b, c, d],
                 MetaMessage::KeySignature(key, sharp) => metadata.key = (key, sharp),
+                MetaMessage::EndOfTrack => println!("End of track"),
 
+                MetaMessage::InstrumentName(bytes) => println!("not implemented: name"),
+                MetaMessage::TrackName(bytes) => println!("not implemented: name"),
                 MetaMessage::MidiChannel(u4) => println!("not implemented: num midi channels"),
                 MetaMessage::MidiPort(u7) => println!("not implemented: num midi ports"),
                 MetaMessage::TrackNumber(_) => println!("not implemented: track number"),
-                MetaMessage::Text(items) => println!("not implemented: text"),
 
                 _ => {}
             },
@@ -386,7 +347,7 @@ impl Analog8 {
 // =============================================================================================
 
 struct SoundBuzzer<'a> {
-    buzzer_pin: Output<'a>,
+    _buzzer_pin: Output<'a>,
     period_micros: u16,
     max_period: i32,
     current_micros: u16,
@@ -398,7 +359,7 @@ impl SoundBuzzer<'_> {
     fn new(pin: AnyPin, pin_num: u32) -> Self {
         assert!((0..=31).contains(&pin_num)); // register only for pins 0 - 31
         Self {
-            buzzer_pin: Output::new(pin, Level::Low),
+            _buzzer_pin: Output::new(pin, Level::Low),
             period_micros: 2000,
             max_period: i32::MAX,
             current_micros: 0,
@@ -416,12 +377,12 @@ impl SoundBuzzer<'_> {
     }
 
     fn play_note(&mut self, sound_profile: &SoundProfile, key: u7) {
-        // key between 0 and 127, so 63 is the middle point
-        // less than 63 = note goes down, so wait time goes up
-        // more than 63 = not goes up, so wait time goes down
+        // key between 0 and 127, so 64 is the middle point
+        // less than 64 = note goes down, so wait time goes up
+        // more than 64 = note goes up, so wait time goes down
 
-        self.period_micros =
-            sound_profile.wait_time - (sound_profile.key_micro_change * (key.as_int() as u16 - 63));
+        self.period_micros = sound_profile.wait_time
+            - (sound_profile.wait_change_per_key * (key.as_int() as u16 - 64));
 
         self.max_period = sound_profile.duration.unwrap_or(i32::MAX);
         println!("period micros: {}", self.period_micros);
@@ -514,23 +475,13 @@ fn main() -> ! {
 
     // ---------- load track ----------
 
-    let (header, track_iter) = parse(MIDI_DATA).unwrap();
-
+    //  let (header, track_iter) = parse(MIDI_DATA).unwrap();
     //  println!("track music data");
     //  for track_event in track_iter.clone().flatten() {
     //      for event in track_event.flatten() {
     //          println!("{:?}", event);
     //      }
     //  }
-    let mut track_iter = track_iter.flatten();
-    println!("{:?}", header);
-    let meta_info = track_iter.next().unwrap();
-
-    let track = track_iter.next().unwrap();
-
-    let track_meta_data = SongMetaData::new(header, meta_info);
-
-    println!("{:?}", track_meta_data);
 
     // ---------- set up pins ----------
 
