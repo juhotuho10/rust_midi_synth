@@ -20,14 +20,8 @@ use esp_backtrace as _;
 use esp_hal::{
     analog::dac::Dac,
     clock::CpuClock,
-    gpio::{AnyPin, Event, Input, Io, Level, Output, Pin, Pull},
-    ledc::{
-        channel::{ChannelHW, ChannelIFace},
-        timer::{HSClockSource, TimerIFace},
-        HighSpeed, LSGlobalClkSource, Ledc, LowSpeed,
-    },
+    gpio::{AnyPin, Input, Level, Output, Pin, Pull},
     main,
-    mcpwm::{operator::PwmPinConfig, timer::PwmWorkingMode, McPwm, PeripheralClockConfig},
 };
 
 use esp_println::println;
@@ -36,9 +30,8 @@ use log::info;
 use heapless::{Deque, LinearMap, Vec};
 
 use midly::{
-    num::{u28, u4, u7},
-    parse, EventIter, Header, MetaMessage, MidiMessage, Timing, TrackEvent, TrackEventKind,
-    TrackIter,
+    num::{u4, u7},
+    parse, EventIter, Header, MetaMessage, MidiMessage, Timing, TrackEventKind,
 };
 
 // =============================================================================================
@@ -261,7 +254,10 @@ impl<'a> SongPlayer<'a> {
                 }
                 MidiMessage::NoteOn { key, vel } => {
                     if let Some(mut free_buzzer) = self.free_buzzers.pop_front() {
-                        let note_to_play = &self.instrument_sounds[channel.as_int() as usize];
+                        //println!("temp change, instrument is whatever, change this back");
+                        //let note_to_play: &SoundProfile = &INSTRUMENTS[8];
+                        let note_to_play: &SoundProfile =
+                            &self.instrument_sounds[channel.as_int() as usize];
                         free_buzzer.play_note(note_to_play, key);
                         let _ = self.taken_buzzers.insert((channel, key), free_buzzer);
                     } else {
@@ -495,63 +491,6 @@ fn main() -> ! {
     // ---------- set up analog DAC pins ----------
 
     let mut dac_25 = Dac::new(peripherals.DAC1, peripherals.GPIO25);
-
-    // ---------- set up LEDC for driving buzzer ----------
-
-    //    let mut ledc = Ledc::new(peripherals.LEDC);
-    //    ledc.set_global_slow_clock(LSGlobalClkSource::APBClk);
-
-    //    let mut lstimer0 = ledc.timer::<LowSpeed>(timer::Number::Timer0);
-    //    lstimer0
-    //        .configure(timer::config::Config {
-    //            duty: timer::config::Duty::Duty1Bit,
-    //            clock_source: timer::LSClockSource::APBClk,
-    //            frequency: 500.Hz(),
-    //        })
-    //        .unwrap();
-
-    //    let mut channel0 = ledc.channel(channel::Number::Channel0, led);
-    //    channel0
-    //        .configure(channel::config::Config {
-    //            timer: &lstimer0,
-    //            duty_pct: 50,
-    //            pin_config: channel::config::PinConfig::PushPull,
-    //        })
-    //        .unwrap();
-
-    //    channel0.start_duty_fade(0, 100, 1).unwrap();
-
-    //    loop {
-    //        // Set up a breathing LED: fade from off to on over a second, then
-    //        // from on back off over the next second.  Then loop2
-
-    //        //channel0.start_duty_fade(0, 100, 1).unwrap();
-    //        //while channel0.is_duty_fade_running() {}
-    //        //channel0.start_duty_fade(100, 0, 1).unwrap();
-    //        //while channel0.is_duty_fade_running() {}
-    //    }
-
-    // ---------- set up MCPWM for driving buzzer ----------
-
-    //  let clock_cfg = PeripheralClockConfig::with_frequency(1.MHz()).unwrap();
-    //  let mut mcpwm = McPwm::new(peripherals.MCPWM0, clock_cfg);
-
-    //  // connect operator0 to timer0
-    //  mcpwm.operator0.set_timer(&mcpwm.timer0);
-    //  // connect operator0 to pin
-    //  let mut pwm_pin = mcpwm
-    //      .operator0
-    //      .with_pin_a(pin0, PwmPinConfig::UP_DOWN_ACTIVE_HIGH);
-
-    //  // start timer with timestamp values in the range of 0..=99 and a frequency
-    //  // of 20 kHz
-    //  let timer_clock_cfg = clock_cfg
-    //      .timer_clock_with_frequency(50, PwmWorkingMode::Increase, 1.kHz())
-    //      .unwrap();
-    //  mcpwm.timer0.start(timer_clock_cfg);
-
-    //  // pin will be high 50% of the time
-    //  pwm_pin.set_timestamp(50);
 
     // ---------- set baseline states ----------
 
