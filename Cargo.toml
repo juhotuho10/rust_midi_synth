@@ -9,11 +9,10 @@ license = "MIT OR Apache-2.0"
 critical-section = "1.2.0"
 esp-backtrace = { version = "0.15.0", features = [
   "esp32",
-  "exception-handler",
   "panic-handler",
   "println",
 ] }
-esp-hal = { version = "0.23.1", features = ["esp32", "unstable"] }
+esp-hal = { version = "1.0.0", features = ["esp32", "unstable"] }
 esp-println = { version = "0.13.0", features = ["esp32", "log"] }
 log = { version = "0.4.21" }
 midly = { version = "=0.5.3", default-features = false}

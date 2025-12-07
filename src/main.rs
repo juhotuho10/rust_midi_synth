@@ -20,7 +20,7 @@ use esp_backtrace as _;
 use esp_hal::{
     analog::dac::Dac,
     clock::CpuClock,
-    gpio::{AnyPin, Input, Level, Output, Pin, Pull},
+    gpio::{AnyPin, Input, InputConfig, Level, Output, OutputConfig, Pin, Pull},
     main,
 };
 
@@ -351,11 +351,11 @@ struct SoundBuzzer<'a> {
     pin_mask: u32,
 }
 
-impl SoundBuzzer<'_> {
-    fn new(pin: AnyPin, pin_num: u32) -> Self {
+impl<'a> SoundBuzzer<'a> {
+    fn new(pin: AnyPin<'a>, pin_num: u32) -> Self {
         assert!((0..=31).contains(&pin_num)); // register only for pins 0 - 31
         Self {
-            _buzzer_pin: Output::new(pin, Level::Low),
+            _buzzer_pin: Output::new(pin, Level::Low, OutputConfig::default()),
             period_micros: 2000,
             max_period: i32::MAX,
             current_micros: 0,
@@ -397,9 +397,14 @@ impl SoundBuzzer<'_> {
             // this is safe because the pin has been configured as an output and the buzzer owns the pin
             // so no one else has access to the pin and the pin state cannot change
             // we also guarantee that pin_num is always inside the valid registers (0..=31)
+
+            // also REGISTERS is guaranteed to be 2 items, with index 0 and 1
+            // so getting unchecked is fine when using a bool
             unsafe {
                 // toggels pin on / off
-                REGISTERS[self.pin_state as usize].write_volatile(self.pin_mask);
+                REGISTERS
+                    .get_unchecked(self.pin_state as usize)
+                    .write_volatile(self.pin_mask);
             }
             self.pin_state = !self.pin_state;
             self.current_micros = 0
@@ -481,12 +486,15 @@ fn main() -> ! {
 
     // ---------- set up pins ----------
 
-    let mut led = Output::new(peripherals.GPIO2, Level::Low);
+    let mut led = Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default());
 
     // roatry encoder input pins
-    let clk = Input::new(peripherals.GPIO18, Pull::Up);
-    let dt = Input::new(peripherals.GPIO19, Pull::Up);
-    let sw = Input::new(peripherals.GPIO23, Pull::Up);
+
+    let up_input_config = InputConfig::default();
+
+    let clk = Input::new(peripherals.GPIO18, up_input_config.with_pull(Pull::Up));
+    let dt = Input::new(peripherals.GPIO19, up_input_config.with_pull(Pull::Up));
+    let sw = Input::new(peripherals.GPIO23, up_input_config.with_pull(Pull::Up));
 
     // ---------- set up analog DAC pins ----------
 
