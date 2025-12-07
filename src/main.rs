@@ -13,7 +13,7 @@ mod data;
 use data::MIDI_DATA;
 
 mod sound_profiles;
-use sound_profiles::{SoundProfile, INSTRUMENTS};
+use sound_profiles::{INSTRUMENTS, SoundProfile};
 
 use esp_backtrace as _;
 
@@ -30,8 +30,9 @@ use log::info;
 use heapless::{Deque, LinearMap, Vec};
 
 use midly::{
+    EventIter, Header, MetaMessage, MidiMessage, Timing, TrackEventKind,
     num::{u4, u7},
-    parse, EventIter, Header, MetaMessage, MidiMessage, Timing, TrackEventKind,
+    parse,
 };
 
 // =============================================================================================
@@ -356,7 +357,7 @@ impl<'a> SoundBuzzer<'a> {
         assert!((0..=31).contains(&pin_num)); // register only for pins 0 - 31
         Self {
             _buzzer_pin: Output::new(pin, Level::Low, OutputConfig::default()),
-            period_micros: 2000,
+            period_micros: 4000,
             max_period: i32::MAX,
             current_micros: 0,
             pin_state: false,
@@ -409,7 +410,7 @@ impl<'a> SoundBuzzer<'a> {
             self.pin_state = !self.pin_state;
             self.current_micros = 0
         }
-        self.max_period -= 20;
+        self.max_period -= 5;
     }
 
     fn adjust_period(&mut self, delta: i16) {
@@ -514,13 +515,13 @@ fn main() -> ! {
     let mut analog_value_pin25 = Analog8::default();
     let mut buzzer_queue: Deque<SoundBuzzer, 16> = Deque::new();
     let _ = buzzer_queue.push_back(buzzer_1);
-    let _ = buzzer_queue.push_back(buzzer_2);
-    let _ = buzzer_queue.push_back(buzzer_3);
-    let _ = buzzer_queue.push_back(buzzer_4);
-    let _ = buzzer_queue.push_back(buzzer_5);
-    let _ = buzzer_queue.push_back(buzzer_6);
-    let _ = buzzer_queue.push_back(buzzer_7);
-    let _ = buzzer_queue.push_back(buzzer_8);
+    //let _ = buzzer_queue.push_back(buzzer_2);
+    //let _ = buzzer_queue.push_back(buzzer_3);
+    //let _ = buzzer_queue.push_back(buzzer_4);
+    //let _ = buzzer_queue.push_back(buzzer_5);
+    //let _ = buzzer_queue.push_back(buzzer_6);
+    //let _ = buzzer_queue.push_back(buzzer_7);
+    //let _ = buzzer_queue.push_back(buzzer_8);
 
     let mut song_player = SongPlayer::new(buzzer_queue);
     // todo: add a self healing meachanism that tries to catch up / slow down to get the correct beat
