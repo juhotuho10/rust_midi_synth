@@ -35,6 +35,8 @@ use midly::{
     parse,
 };
 
+type SoundKey = (u4, u7);
+
 // =============================================================================================
 //                         WRITE REGISTERS FOR PIN 0 - 31 FOR FAST TOGGLING
 // =============================================================================================
@@ -108,7 +110,7 @@ impl SongMetaData {
 struct SongPlayer<'a> {
     instrument_sounds: [SoundProfile; 16],
     free_buzzers: Deque<SoundBuzzer<'a>, 16>,
-    taken_buzzers: LinearMap<(u4, u7), SoundBuzzer<'a>, 16>,
+    taken_buzzers: LinearMap<SoundKey, SoundBuzzer<'a>, 16>,
 }
 
 impl<'a> SongPlayer<'a> {
@@ -125,7 +127,7 @@ impl<'a> SongPlayer<'a> {
     }
 
     fn reset(&mut self) {
-        let mut keys = Deque::<(u4, u7), 16>::new();
+        let mut keys = Deque::<SoundKey, 16>::new();
 
         for key in self.taken_buzzers.keys() {
             if keys.push_back(*key).is_err() {
@@ -140,6 +142,7 @@ impl<'a> SongPlayer<'a> {
         }
     }
 
+    #[inline(always)]
     fn play_buzzers(&mut self) {
         for buzzer in self.taken_buzzers.values_mut() {
             buzzer.update();
@@ -147,7 +150,7 @@ impl<'a> SongPlayer<'a> {
     }
 
     fn free_buzzers(&mut self) {
-        let mut freed_keys = Deque::<(u4, u7), 16>::new();
+        let mut freed_keys = Deque::<SoundKey, 16>::new();
 
         for key in self
             .taken_buzzers
@@ -177,26 +180,30 @@ impl<'a> SongPlayer<'a> {
         let (header, track_iter) = parse(midi_track).expect("valid midi track");
         let mut metadata = SongMetaData::new(header);
 
-        let mut next_events: [Option<(u16, TrackEventKind<'_>)>; 16] = [None; 16];
+        let mut all_tracks: [Option<(u16, TrackEventKind<'_>)>; 16] = [None; 16];
 
         // todo: take while delta = 0 from first track, see if there are meta info there, maybe
         let mut tracks: Vec<EventIter<'_>, 16> = track_iter.flatten().collect();
 
+        let mut track_count = 0;
         for (i, t) in tracks.iter_mut().enumerate() {
             if let Some(Ok(first_event)) = t.next() {
-                next_events[i] = Some((first_event.delta.as_int() as u16, first_event.kind));
+                track_count += 1;
+                all_tracks[i] = Some((first_event.delta.as_int() as u16, first_event.kind));
             }
         }
 
+        let playable_tracks = &mut all_tracks[..track_count];
+
         // ------------------- play all the track events in order -------------------
-        while next_events.iter().any(|x| x.is_some()) {
+        while playable_tracks.iter().any(|x| x.is_some()) {
             // pick the next event with the lowest delta
-            let next_track_idx = Self::find_min_index(&next_events);
-            let (delay, event_kind) = next_events[next_track_idx].expect("cannot fail");
+            let next_track_idx = Self::find_min_index(playable_tracks, &track_count);
+            let (delay, event_kind) = playable_tracks[next_track_idx].expect("cannot fail");
 
             // ------------------- apply the delay to each of the items -------------------
             if delay != 0 {
-                next_events
+                playable_tracks
                     .iter_mut()
                     .filter_map(|event| event.as_mut())
                     .for_each(|inner_event| inner_event.0 -= delay);
@@ -206,10 +213,10 @@ impl<'a> SongPlayer<'a> {
             match tracks[next_track_idx].next() {
                 Some(next_event) => {
                     let replacing_event = next_event.expect("invalid track event");
-                    next_events[next_track_idx] =
+                    playable_tracks[next_track_idx] =
                         Some((replacing_event.delta.as_int() as u16, replacing_event.kind));
                 }
-                None => next_events[next_track_idx] = None,
+                None => playable_tracks[next_track_idx] = None,
             }
             // println!(
             //     "delay: {:?}, tracknum: {:?}, event: {:?}",
@@ -302,11 +309,11 @@ impl<'a> SongPlayer<'a> {
     }
 
     #[inline(always)]
-    fn find_min_index(list: &[Option<(u16, TrackEventKind<'_>)>; 16]) -> usize {
+    fn find_min_index(list: &[Option<(u16, TrackEventKind<'_>)>], track_count: &usize) -> usize {
         // find the index with the lowest u16
         let mut min_index = 0;
         let mut min_delta: u16 = u16::MAX;
-        for (i, track_item) in list.iter().enumerate() {
+        for (i, track_item) in list[..*track_count].iter().enumerate() {
             if let Some((delta, _)) = track_item {
                 if delta == &0 {
                     return i;
@@ -373,6 +380,7 @@ impl<'a> SoundBuzzer<'a> {
         // self.pin_state = false;
     }
 
+    #[inline(always)]
     fn play_note(&mut self, sound_profile: &SoundProfile, key: u7) {
         // key between 0 and 127, so 64 is the middle point
         // less than 64 = note goes down, so wait time goes up
@@ -413,6 +421,7 @@ impl<'a> SoundBuzzer<'a> {
         self.max_period -= 5;
     }
 
+    #[inline(always)]
     fn adjust_period(&mut self, delta: i16) {
         self.period_micros = self.period_micros.saturating_add_signed(delta);
         self.period_micros = self.period_micros.clamp(100, 20000);
