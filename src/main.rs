@@ -297,8 +297,10 @@ impl<'a> SongPlayer<'a> {
 
                 MetaMessage::InstrumentName(bytes) => println!("not implemented: name"),
                 MetaMessage::TrackName(bytes) => println!("not implemented: name"),
-                MetaMessage::MidiChannel(u4) => println!("not implemented: num midi channels"),
-                MetaMessage::MidiPort(u7) => println!("not implemented: num midi ports"),
+                MetaMessage::MidiChannel(channel_id) => {
+                    println!("not implemented: num midi channels")
+                }
+                MetaMessage::MidiPort(port_id) => println!("not implemented: num midi ports"),
                 MetaMessage::TrackNumber(_) => println!("not implemented: track number"),
 
                 _ => {}
